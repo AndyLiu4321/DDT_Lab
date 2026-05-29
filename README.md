@@ -11,7 +11,7 @@ constrained PPO) built on [Isaac Lab](https://isaac-sim.github.io/IsaacLab/).
 | Dependency | Version |
 |---|---|
 | NVIDIA Isaac Sim | 5.1 |
-| Isaac Lab | 5.1 (conda install recommended) |
+| Isaac Lab | [v2.3.0](https://isaac-sim.github.io/IsaacLab/v2.3.0/index.html) |
 | Python | 3.11 (bundled with Isaac Sim) |
 | CUDA | 12.x |
 
@@ -26,13 +26,13 @@ The conda-based install is recommended:
 
 ```bash
 # After cloning IsaacLab:
-conda activate isaaclab5.1
+conda activate env_isaaclab
 ```
 
 ### 2. Clone this repo (outside the IsaacLab directory)
 
 ```bash
-git clone <repo-url> ddt_lab
+git clone https://github.com/DDTRobot/DDT_Lab/tree/np3o ddt_lab
 cd ddt_lab
 ```
 
