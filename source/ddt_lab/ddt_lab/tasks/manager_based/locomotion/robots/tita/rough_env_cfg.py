@@ -188,8 +188,8 @@ class ObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
 
-        # observation terms (order preserved)
-        # base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1), clip=(-100.0, 100.0), scale=2.0)
+        # base_lin_vel is intentionally absent from the policy group: NP3O's
+        # BarlowTwins vel head supervises on critic-side base_lin_vel.
         base_ang_vel = ObsTerm(
             func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2), clip=(-100.0, 100.0), scale=0.25
         )
@@ -422,7 +422,6 @@ class RewardsCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "mirror_joints": [["joint_left_leg_(1|2|3)", "joint_right_leg_(1|2|3)"]],
-            "invert_joints": [-1, 1, 1],
         },
     )
     # hip_joint_l2 = RewTerm(
@@ -526,6 +525,11 @@ class TitaRoughEnvCfg(ManagerBasedRLEnvCfg):
         else:
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
+
+        # NP3O / BarlowTwins-PPO requires 3D policy obs (B, T, D); set group-level
+        # history once instead of flagging every ObsTerm.
+        self.observations.policy.history_length = 10
+        self.observations.policy.flatten_history_dim = False
 
     # def disable_zero_weight_rewards(self):
     #     """If the weight of rewards is 0, set rewards to None"""

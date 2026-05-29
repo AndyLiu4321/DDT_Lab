@@ -8,7 +8,10 @@ import gymnasium as gym
 from . import agents, flat_env_cfg, rough_env_cfg
 
 ##
-# Register Gym environments.
+# Register Gym environments. Each task is wired to NP3O (BarlowTwins-PPO).
+# Stock PPO is no longer supported on these tasks because the policy obs is now
+# 3D (history_length=10, flatten_history_dim=False) — the upstream
+# rsl_rl ``ActorCritic`` cannot consume that shape.
 ##
 
 gym.register(
@@ -17,7 +20,7 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": flat_env_cfg.D1FlatEnvCfg,
-        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:D1FlatPPORunnerCfg",
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:d1_flat_np3o_runner_cfg",
     },
 )
 
@@ -27,7 +30,7 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": flat_env_cfg.D1FlatEnvCfg_PLAY,
-        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:D1FlatPPORunnerCfg",
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:d1_flat_np3o_runner_cfg",
     },
 )
 
@@ -37,7 +40,7 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": rough_env_cfg.D1RoughEnvCfg,
-        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:D1RoughPPORunnerCfg",
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:d1_rough_np3o_runner_cfg",
     },
 )
 
@@ -47,6 +50,6 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": rough_env_cfg.D1RoughEnvCfg_PLAY,
-        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:D1RoughPPORunnerCfg",
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:d1_rough_np3o_runner_cfg",
     },
 )

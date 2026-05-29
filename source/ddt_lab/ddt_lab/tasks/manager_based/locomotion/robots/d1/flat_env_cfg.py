@@ -3,6 +3,14 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+"""D1 flat-ground env, mirroring ``LocomotionWithNP3O/configs/d1/d1_flat_config.py``.
+
+Reward weights and the cost set are configured in ``rough_env_cfg.py``; this
+file only encodes flat-specific differences: terrain switched to a plane, the
+critic's height_scan disabled, terrain curriculum disabled, looser reset poses,
+and (for the play variant) zero commands + no domain randomisation.
+"""
+
 from isaaclab.utils import configclass
 
 from .rough_env_cfg import D1RoughEnvCfg
@@ -11,23 +19,26 @@ from .rough_env_cfg import D1RoughEnvCfg
 @configclass
 class D1FlatEnvCfg(D1RoughEnvCfg):
     def __post_init__(self):
-        # post init of parent
         super().__post_init__()
 
-        # override rewards
-        # self.rewards.flat_orientation_l2.weight = -5.0
-        # self.rewards.dof_torques_l2.weight = -2.5e-5
-
-        # self.rewards.feet_air_time.weight = 0.5
-        # change terrain to flat
+        # ---------------- terrain (plane, no height scan) ----------------
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
-        # no height scan
         self.scene.height_scanner = None
-        self.observations.policy.height_scan = None
+        # Remove the scanner ObsGroup entirely on flat terrain — no height_scanner.
+        self.observations.scanner = None
         # no terrain curriculum
         self.curriculum.terrain_levels = None
-        # ------------------------------Events------------------------------
+
+        # ---------------- commands (D1FlatCfg.commands.ranges) ----------------
+        # Same as reference: ±1 m/s xy linear, ±1 rad/s yaw, full heading range.
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.heading = (-3.14, 3.14)
+
+        # ---------------- domain randomisation events (looser reset pose) ----------------
+        # Matches D1FlatCfg's _reset_root_states wider initial pose distribution.
         # self.events.reset_base.params = {
         #     "pose_range": {
         #         "x": (-0.5, 0.5),
@@ -46,24 +57,28 @@ class D1FlatEnvCfg(D1RoughEnvCfg):
         #         "yaw": (-0.5, 0.5),
         #     },
         # }
-        # if self.__class__.__name__ == "D1FlatEnvCfg":
-        #     self.disable_zero_weight_rewards()
 
 
+@configclass
 class D1FlatEnvCfg_PLAY(D1FlatEnvCfg):
     def __post_init__(self) -> None:
-        # post init of parent
         super().__post_init__()
 
-        # make a smaller scene for play
+        # smaller scene for interactive playback
         self.scene.num_envs = 50
         self.scene.env_spacing = 2.5
-        # disable randomization for play
+
+        # disable noise / external pushes / domain rand events for stable playback
         self.observations.policy.enable_corruption = False
-        # remove random pushing
         self.events.base_external_force_torque = None
         self.events.push_robot = None
         self.events.add_base_inertia = None
         self.events.add_base_com = None
         self.events.add_base_mass = None
         self.events.randomize_actuator_gains = None
+
+        # zero commands (matches D1FlatCfg_Play.commands.ranges)
+        # self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
+        # self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        # self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        # self.commands.base_velocity.ranges.heading = (0.0, 0.0)
