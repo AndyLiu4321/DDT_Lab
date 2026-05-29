@@ -24,7 +24,7 @@ from isaaclab.actuators import (  # noqa: F401
 )
 from isaaclab.assets.articulation import ArticulationCfg
 
-DDT_MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../data/robots"))
+# DDT_MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../data/robots"))
 DDT_MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../ddt_ros2_control/urdfs"))
 
 
