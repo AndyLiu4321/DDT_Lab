@@ -103,6 +103,8 @@ git pull origin release/2.3.0
 python scripts/tutorials/00_sim/create_empty.py
 ```
 到此Isaaclab的环境安装完成了
+
+conda activate isaaclab
 ## Trainning
 DDT_lab提供了丰富的训练环境，首先需要安装好依赖。
 ```
@@ -118,6 +120,7 @@ python scripts/list_envs.py
 ```
 # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
 python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
+python scripts/rsl_rl/train.py --task=DDT-Velocity-Flat-D1-v0
 ```
 注意，应根据上一步列出的任务名运行，否则会报错。同时不要使用有Play的任务进行训练，这是因为这个参数比较小，用于推理，不适合用于训练。
 
@@ -143,7 +146,8 @@ python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME> --headless --video
 
     ```bash
     # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python scripts/random_agent.py --task=<TASK_NAME>
+    python scripts/random_agent.py --task=test
+    <TASK_NAME>
     ```
 
 ## Evaluation
@@ -160,6 +164,7 @@ python scripts/rsl_rl/play.py \
     --task DDT-Velocity-Flat-Tita-Play-v0 \
     --num_envs 50 \
     --checkpoint "./logs/rsl_rl/<path-to-your-file>"
+
 ```
 
 其中，task输入对应的训练任务的play版本，load_run输入对应的时间日期，checkpoint输入对应的权重文件,num_envs是推理的环境数量。
