@@ -1,0 +1,60 @@
+# Tita
+python scripts/np3o/train.py \
+  --task=DDT-Velocity-Rough-Tita-v0 \
+  --num_envs 8192 \
+  --termination_stage 1 \
+  --headless \
+  --max_iterations 20000 
+
+python scripts/np3o/train.py \
+  --task=DDT-Velocity-Rough-Tita-v0 \
+  --num_envs 4096 \
+  --termination_stage 2 \
+  --resume \
+  --load_run ".*" \
+  --load_checkpoint "/home/htw/ddt_lab/logs/np3o/tita_rough/2026-06-09_11-56-51/model_2000.pt" \
+  --headless
+
+python train.py
+--task=DDT-Velocity-Rough-Tita-v0
+--num_envs 4096
+--termination_stage 2
+--resume
+--load_run "2026-06-09_11-56-51"
+--load_checkpoint "model_2000.pt"
+--headless
+
+python scripts/np3o/play.py \
+    --task DDT-Velocity-Rough-Tita-Play-v0 \
+    --num_envs 50 \
+    --checkpoint "/home/htw/ddt_lab/logs/np3o/tita_rough/2026-06-09_17-59-44/model_20000.pt" \
+    --termination_stage 1 \
+    --headless \
+    --video
+
+
+
+# D1：
+
+python scripts/np3o/train.py \
+  --task=DDT-Velocity-Rough-D1-v0 \
+  --num_envs 4096 \
+  --termination_stage 1 \
+  --max_iterations 2000 \
+  --headless
+python scripts/np3o/train.py \
+  --task=DDT-Velocity-Rough-D1-v0 \
+  --num_envs 4096 \
+
+python scripts/np3o/play.py \
+    --task DDT-Velocity-Rough-D1-Play-v0 \
+    --num_envs 50 \
+    --checkpoint "/home/htw/ddt_lab/logs/np3o/d1_rough/2026-06-09_15-20-40/model_2600.pt" \
+    --headless \
+    --video
+
+    
+source /opt/ros/humble/setup.bash
+source /home/htw/ddt_ros2_ws/install/setup.bash
+ros2 run keyboard_controller keyboard_controller_node
+
