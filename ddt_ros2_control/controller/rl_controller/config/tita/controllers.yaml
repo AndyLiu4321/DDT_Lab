@@ -76,8 +76,10 @@
         - "rl_flat"
 
       rl_flat:
-        policy_path: config/tita/flat.onnx
-        output_name: "78"
+        policy_path: config/tita/policy.onnx
+        # policy_path: config/tita/flat.onnx
+        output_name: "nn_output"
+        # output_name: "78"
         policy_type: "np3o"
         # env
         num_obs: 33

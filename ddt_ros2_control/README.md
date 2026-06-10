@@ -165,3 +165,7 @@ export WEBOTS_HOME=/usr/lib/webots
 
 ## 许可证
 各子包的许可证可能不同，请参考对应 `package.xml` 中的 `license` 字段。
+
+
+cd /home/htw/ddt_ros2_ws && source /opt/ros/humble/setup.bash && source install/setup.bash && ros2 launch rl_controller sim_mujoco.launch.py robot:=tita
+ros2 run keyboard_controller keyboard_controller_node
