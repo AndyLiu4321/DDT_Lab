@@ -1,12 +1,12 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers[](https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
-
 import math
 
 import ddt_lab.tasks.manager_based.locomotion.mdp as mdp
 import isaaclab.sim as sim_utils
+from ddt_lab.managers import CostTermCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
@@ -67,7 +67,15 @@ class SceneCfg(InteractiveSceneCfg):
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
-    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=10, track_air_time=True)
+    # height_scanner_base = RayCasterCfg(
+    #     prim_path="{ENV_REGEX_NS}/Robot/base_link",
+    #     offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+    #     ray_alignment="yaw",
+    #     pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.1, 0.1)),
+    #     debug_vis=False,
+    #     mesh_prim_paths=["/World/ground"],
+    # )
+    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
     # lights
     light = AssetBaseCfg(
         prim_path="/World/light",
@@ -104,134 +112,79 @@ class CommandsCfg:
 
 @configclass
 class ActionsCfg:
-    """Action specifications for the MDP."""
+    """Action specifications for the MDP.
 
-    joint_pos_0 = mdp.JointPositionActionCfg(
+    8 ActionTerms — one ``leg_pos`` (3 joints) + one ``leg_vel`` (1 wheel
+    joint) per leg, in FL → FR → RL → RR order. Together they reproduce the
+    original 16-term layout: ``[FL_hip, FL_thigh, FL_calf, FL_foot,
+    FR_hip, ..., RR_foot]``. Per-leg ``scale`` is provided as a regex dict
+    (hip 0.125, thigh / calf 0.25); wheel velocity scale is a flat 5.0.
+
+    ``preserve_order=True`` keeps the within-term order identical to the
+    declared joint list.
+    """
+
+    fl_leg_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
-        joint_names=["FL_hip_joint"],
+        joint_names=["FL_hip_joint", "FL_thigh_joint", "FL_calf_joint"],
+        scale={".*_hip_joint": 0.25, ".*_thigh_joint": 0.25, ".*_calf_joint": 0.25},
         clip={".*": (-100.0, 100.0)},
-        scale=0.125,
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_pos_1 = mdp.JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["FL_thigh_joint"],
-        clip={".*": (-100.0, 100.0)},
-        scale=0.25,
-        use_default_offset=True,
-        preserve_order=True,
-    )
-    joint_pos_2 = mdp.JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["FL_calf_joint"],
-        clip={".*": (-100.0, 100.0)},
-        scale=0.25,
-        use_default_offset=True,
-        preserve_order=True,
-    )
-    joint_vel_3 = mdp.JointVelocityActionCfg(
+    fl_foot_vel = mdp.JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["FL_foot_joint"],
-        clip={".*": (-100.0, 100.0)},
         scale=5.0,
-        use_default_offset=True,
-        preserve_order=True,
-    )
-    joint_pos_4 = mdp.JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["FR_hip_joint"],
         clip={".*": (-100.0, 100.0)},
-        scale=0.125,
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_pos_5 = mdp.JointPositionActionCfg(
+    fr_leg_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
-        joint_names=["FR_thigh_joint"],
+        joint_names=["FR_hip_joint", "FR_thigh_joint", "FR_calf_joint"],
+        scale={".*_hip_joint": 0.25, ".*_thigh_joint": 0.25, ".*_calf_joint": 0.25},
         clip={".*": (-100.0, 100.0)},
-        scale=0.25,
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_pos_6 = mdp.JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["FR_calf_joint"],
-        clip={".*": (-100.0, 100.0)},
-        scale=0.25,
-        use_default_offset=True,
-        preserve_order=True,
-    )
-    joint_vel_7 = mdp.JointVelocityActionCfg(
+    fr_foot_vel = mdp.JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["FR_foot_joint"],
-        clip={".*": (-100.0, 100.0)},
         scale=5.0,
-        use_default_offset=True,
-        preserve_order=True,
-    )
-
-    joint_pos_8 = mdp.JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["RL_hip_joint"],
         clip={".*": (-100.0, 100.0)},
-        scale=0.125,
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_pos_9 = mdp.JointPositionActionCfg(
+    rl_leg_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
-        joint_names=["RL_thigh_joint"],
+        joint_names=["RL_hip_joint", "RL_thigh_joint", "RL_calf_joint"],
+        scale={".*_hip_joint": 0.25, ".*_thigh_joint": 0.25, ".*_calf_joint": 0.25},
         clip={".*": (-100.0, 100.0)},
-        scale=0.25,
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_pos_10 = mdp.JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["RL_calf_joint"],
-        clip={".*": (-100.0, 100.0)},
-        scale=0.25,
-        use_default_offset=True,
-        preserve_order=True,
-    )
-    joint_vel_11 = mdp.JointVelocityActionCfg(
+    rl_foot_vel = mdp.JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["RL_foot_joint"],
-        clip={".*": (-100.0, 100.0)},
         scale=5.0,
-        use_default_offset=True,
-        preserve_order=True,
-    )
-    joint_pos_12 = mdp.JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["RR_hip_joint"],
         clip={".*": (-100.0, 100.0)},
-        scale=0.125,
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_pos_13 = mdp.JointPositionActionCfg(
+    rr_leg_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
-        joint_names=["RR_thigh_joint"],
+        joint_names=["RR_hip_joint", "RR_thigh_joint", "RR_calf_joint"],
+        scale={".*_hip_joint": 0.125, ".*_thigh_joint": 0.25, ".*_calf_joint": 0.25},
         clip={".*": (-100.0, 100.0)},
-        scale=0.25,
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_pos_14 = mdp.JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["RR_calf_joint"],
-        clip={".*": (-100.0, 100.0)},
-        scale=0.25,
-        use_default_offset=True,
-        preserve_order=True,
-    )
-    joint_vel_15 = mdp.JointVelocityActionCfg(
+    rr_foot_vel = mdp.JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["RR_foot_joint"],
-        clip={".*": (-100.0, 100.0)},
         scale=5.0,
+        clip={".*": (-100.0, 100.0)},
         use_default_offset=True,
         preserve_order=True,
     )
@@ -243,53 +196,59 @@ class ObservationsCfg:
 
     @configclass
     class PolicyCfg(ObsGroup):
-        """Observations for policy group - EXACTLY 33 dimensions per step."""
+        """Observations for policy group."""
 
+        # observation terms (order preserved)
+        # base_lin_vel is intentionally absent from the policy group: NP3O's
+        # BarlowTwins vel head supervises on critic-side base_lin_vel
+        # (see CriticCfg.base_lin_vel below).
         base_ang_vel = ObsTerm(
-            func=mdp.base_ang_vel,
-            noise=Unoise(n_min=-0.2, n_max=0.2),
-            scale=0.25,
+            func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2), clip=(-100.0, 100.0), scale=0.25
         )
-
         projected_gravity = ObsTerm(
-            func=mdp.projected_gravity,
-            noise=Unoise(n_min=-0.05, n_max=0.05),
+            func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05), clip=(-100.0, 100.0), scale=1.0
         )
-
         velocity_commands = ObsTerm(
             func=mdp.generated_commands,
             params={"command_name": "base_velocity"},
+            clip=(-100.0, 100.0),
             scale=(2.0, 2.0, 0.25),
         )
-
-        # Only leg joints (hip, thigh, calf × 4 legs) -> 12 dim
         joint_pos = ObsTerm(
-            func=mdp.joint_pos_rel,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_(hip|thigh|calf)_joint"])},
+            func=mdp.joint_pos_rel_without_wheel,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True),
+                "wheel_asset_cfg": SceneEntityCfg("robot", joint_names=".*_foot_joint"),
+            },
             noise=Unoise(n_min=-0.01, n_max=0.01),
+            clip=(-100.0, 100.0),
             scale=1.0,
         )
-
-        # Only leg joint velocities -> 12 dim
         joint_vel = ObsTerm(
-            func=mdp.joint_vel,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_(hip|thigh|calf)_joint"])},
+            func=mdp.joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
             noise=Unoise(n_min=-1.5, n_max=1.5),
+            clip=(-100.0, 100.0),
             scale=0.05,
         )
-
-        # NO last_action! This is critical to keep dim = 33
+        actions = ObsTerm(func=mdp.last_action, clip=(-100.0, 100.0), scale=1.0)
+        # height_scan = ObsTerm(
+        #     func=mdp.height_scan,
+        #     params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+        #     noise=Unoise(n_min=-0.1, n_max=0.1),
+        #     clip=(-1.0, 1.0),
+        #     scale=1.0
+        # )
 
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True
-            # Force 10-step history -> total input = 330
-            self.history_length = 10
 
     @configclass
     class CriticCfg(ObsGroup):
-        """Observations for critic group (privileged)."""
+        """Observations for critic group."""
 
+        # observation terms (order preserved)
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel, clip=(-100.0, 100.0), scale=2.0)
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, clip=(-100.0, 100.0), scale=0.25)
         projected_gravity = ObsTerm(func=mdp.projected_gravity, clip=(-100.0, 100.0), scale=1.0)
@@ -316,30 +275,76 @@ class ObservationsCfg:
         )
         actions = ObsTerm(func=mdp.last_action, clip=(-100.0, 100.0), scale=1.0)
 
-        height_scan = ObsTerm(
-            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, clip=(-1.0, 1.0), scale=1.0
+        def __post_init__(self):
+            pass
+            # self.enable_corruption = False
+            # self.concatenate_terms = True
+
+    @configclass
+    class PrivCfg(ObsGroup):
+        """Privileged physical parameters for the critic.
+
+        Absent from the policy group so the actor cannot directly observe them.
+        The BarlowTwins history encoder must implicitly infer them from proprio
+        history — this is the NP3O privileged-learning mechanism.
+        Mirrors ``LocomotionWithNP3O`` ``priv_latent`` subset that is cheaply
+        available from Isaac Lab's Articulation data without extra PhysX calls.
+        """
+
+        contact_state = ObsTerm(
+            func=mdp.contact_state,
+            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_foot"])},
+            clip=(-1.0, 1.0),
+            scale=1.0,
+        )
+        joint_kp_factor = ObsTerm(
+            func=mdp.joint_kp_factor,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+            clip=(0.0, 2.0),
+            scale=1.0,
+        )
+        joint_kd_factor = ObsTerm(
+            func=mdp.joint_kd_factor,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+            clip=(0.0, 2.0),
+            scale=1.0,
         )
 
-        def __post_init__(self):
-            # Critic typically does not need long history
-            self.history_length = 1
+    @configclass
+    class ScannerCfg(ObsGroup):
+        """Height-scan input for the critic / scan encoder.
 
+        Set to ``None`` on flat-terrain tasks where the scene has no
+        ``height_scanner``.
+        """
+
+        height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            clip=(-1.0, 1.0),
+            scale=1.0,
+        )
+
+    # observation groups
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
+    priv: PrivCfg = PrivCfg()
+    scanner: ScannerCfg = ScannerCfg()
 
 
 @configclass
 class EventCfg:
     """Configuration for events."""
-    # (保持原样，未修改)
+
+    # startup
     physics_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.3, 1.2),
-            "dynamic_friction_range": (0.3, 1.2),
-            "restitution_range": (0.0, 0.15),
+            "static_friction_range": (0.2, 2.75),
+            "dynamic_friction_range": (0.2, 2.75),
+            "restitution_range": (0.0, 1.0),
             "num_buckets": 64,
         },
     )
@@ -348,7 +353,7 @@ class EventCfg:
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_base_link"),
             "mass_distribution_params": (-1.0, 3.0),
             "operation": "add",
             "recompute_inertia": True,
@@ -359,16 +364,17 @@ class EventCfg:
         func=mdp.randomize_rigid_body_com,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
-            "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_base_link"),
+            "com_range": {"x": (-0.1, 0.1), "y": (-0.1, 0.1), "z": (-0.1, 0.1)},
         },
     )
 
+    # reset
     base_external_force_torque = EventTerm(
         func=mdp.apply_external_force_torque,
         mode="reset",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_base_link"),
             "force_range": (-10.0, 10.0),
             "torque_range": (-10.0, 10.0),
         },
@@ -418,44 +424,48 @@ class EventCfg:
         },
     )
 
+    # interval
     push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
         mode="interval",
         interval_range_s=(10.0, 15.0),
-        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+        params={"velocity_range": {"x": (-1.0, 1.0), "y": (-1.0, 1.0), "z": (-1.0, 1.0)}},
     )
 
 
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
-    # (保持原样，未修改)
+
+    # General
     is_terminated = RewTerm(func=mdp.is_terminated, weight=0.0)
 
+    # -- task
     track_lin_vel_xy_exp = RewTerm(
-        func=mdp.track_lin_vel_xy_exp, weight=3.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+        func=mdp.track_lin_vel_xy_exp, weight=2.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
     track_ang_vel_z_exp = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=1.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+        func=mdp.track_ang_vel_z_exp, weight=1.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
 
+    # -- root penalties
     lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-0.0)
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)
     base_height_l2 = RewTerm(
         func=mdp.base_height_l2,
-        weight=-0.0,
-        params={"target_height": 0.5},
-    )
-    body_lin_acc_l2 = RewTerm(
-        func=mdp.body_lin_acc_l2,
-        weight=0.0,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names="base_link")},
+        weight=-1.0,
+        params={
+            # "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
+            # "sensor_cfg": SceneEntityCfg("height_scanner_base"),
+            "target_height": 0.45,
+        },
     )
 
+    # -- joint penalties
     joint_torques_l2 = RewTerm(
         func=mdp.joint_torques_l2,
-        weight=-1.0e-5,
+        weight=0.0,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*(hip|thigh|calf)_joint"])},
     )
     joint_vel_l2 = RewTerm(
@@ -465,17 +475,12 @@ class RewardsCfg:
     )
     joint_acc_l2 = RewTerm(
         func=mdp.joint_acc_l2,
-        weight=-1.0e-7,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*(hip|thigh|calf)_joint"])},
-    )
-    joint_acc_wheel_l2 = RewTerm(
-        func=mdp.joint_acc_l2,
-        weight=-2.5e-10,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_foot_joint"])},
+        weight=-2.5e-7,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
     )
     joint_pos_limits = RewTerm(
         func=mdp.joint_pos_limits,
-        weight=-5.0,
+        weight=-0.0,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*(hip|thigh|calf)_joint"])},
     )
     joint_vel_limits = RewTerm(
@@ -485,54 +490,17 @@ class RewardsCfg:
     )
     joint_power = RewTerm(
         func=mdp.joint_power,
-        weight=-1e-5,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*(hip|thigh|calf)_joint"])},
-    )
-    stand_still = RewTerm(
-        func=mdp.stand_still,
-        weight=-2.0,
-        params={
-            "command_name": "base_velocity",
-            "command_threshold": 0.1,
-            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*(hip|thigh|calf)_joint"]),
-        },
-    )
-    joint_pos_penalty = RewTerm(
-        func=mdp.joint_pos_penalty,
-        weight=-1.0,
-        params={
-            "command_name": "base_velocity",
-            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*(hip|thigh|calf)_joint"]),
-            "stand_still_scale": 5.0,
-            "velocity_threshold": 0.5,
-            "command_threshold": 0.1,
-        },
-    )
-    wheel_vel_penalty = RewTerm(
-        func=mdp.wheel_vel_penalty,
         weight=0.0,
         params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
-            "command_name": "base_velocity",
-            "velocity_threshold": 0.5,
-            "command_threshold": 0.1,
-        },
-    )
-    joint_mirror = RewTerm(
-        func=mdp.joint_mirror,
-        weight=-0.05,
-        params={
-            "asset_cfg": SceneEntityCfg("robot"),
-            "mirror_joints": [
-                ["FR_(hip|thigh|calf).*", "RL_(hip|thigh|calf).*"],
-                ["FL_(hip|thigh|calf).*", "RR_(hip|thigh|calf).*"],
-            ],
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*(hip|thigh|calf)_joint"]),
         },
     )
 
+
+    # -- action penalties
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
 
+    # -- Contact sensor
     undesired_contacts = RewTerm(
         func=mdp.undesired_contacts,
         weight=-1.0,
@@ -540,34 +508,50 @@ class RewardsCfg:
     )
     contact_forces = RewTerm(
         func=mdp.contact_forces,
-        weight=-1.5e-4,
+        weight=-0.0e-4,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_foot"]),
-            "threshold": 100.0,
+            "threshold": 400.0,
         },
     )
 
-    upward = RewTerm(func=mdp.upward, weight=3.0)
-    feet_contact_without_cmd = RewTerm(
-        func=mdp.feet_contact_without_cmd,
-        weight=0.1,
+    # -- optional penalties
+    upward = RewTerm(
+        func=mdp.upward,
+        weight=0.0,
+    )
+
+    # -- pose regularisation (D1FlatCfg.rewards.scales.{default_joint, hip_pos})
+    default_joint_l2 = RewTerm(
+        func=mdp.default_joint_l2,
+        weight= -0.0,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*(hip|thigh|calf)_joint"])},
+    )
+    hip_pos = RewTerm(
+        func=mdp.default_joint_l2,
+        weight=-0.0,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_joint"]),
         },
     )
-
 
 @configclass
 class TerminationsCfg:
     """Termination terms for the MDP."""
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
+    # command_resample
     terrain_out_of_bounds = DoneTerm(
         func=mdp.terrain_out_of_bounds,
         params={"asset_cfg": SceneEntityCfg("robot"), "distance_buffer": 3.0},
         time_out=True,
     )
+
+    # Contact sensor
+    # illegal_contact = DoneTerm(
+    #     func=mdp.illegal_contact,
+    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=""), "threshold": 1.0},
+    # )
 
 
 @configclass
@@ -577,19 +561,63 @@ class CurriculumCfg:
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
 
 
+##
+# Cost configuration (NP3O constrained training)
+##
+
+
+@configclass
+class CostsCfg:
+    """NP3O cost terms. Detected by ``IsaacLabNP3OWrapper`` and fed into the
+    Lagrangian-constrained PPO update. Drop this attribute on the env cfg to
+    fall back to PPO+BarlowTwins (no constraints)."""
+
+    joint_pos_limit = CostTermCfg(
+        func=mdp.joint_pos_limit,
+        scale=1.0,
+        d_value=0.0,
+        k_value=0.01,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*(hip|thigh|calf)_joint"])},
+    )
+    joint_vel_limit = CostTermCfg(
+        func=mdp.joint_vel_limit,
+        scale=1.0,
+        d_value=0.0,
+        k_value=0.01,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
+    )
+    joint_torque_limit = CostTermCfg(
+        func=mdp.joint_torque_limit,
+        scale=1.0,
+        d_value=0.0,
+        k_value=0.01,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
+    )
+
+
+##
+# Environment configuration
+##
+
+
 @configclass
 class D1RoughEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
+    # Scene settings
     scene: SceneCfg = SceneCfg(num_envs=4096, env_spacing=2.5)
+    # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
     commands: CommandsCfg = CommandsCfg()
+    # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
+    costs: CostsCfg = CostsCfg()
 
+    # fmt: off
     joint_names = [
         "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint", "FL_foot_joint",
         "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint", "FR_foot_joint",
@@ -599,21 +627,29 @@ class D1RoughEnvCfg(ManagerBasedRLEnvCfg):
     wheel_joint_names = [
         "FR_foot_joint", "FL_foot_joint", "RR_foot_joint", "RL_foot_joint",
     ]
+    # joint_names = leg_joint_names + wheel_joint_names
+    # fmt: on
 
     def __post_init__(self):
+        """Post initialization."""
+        # general settings
         self.decimation = 4
         self.episode_length_s = 20.0
+        # simulation settings
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
         self.sim.disable_contact_processing = True
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
-
+        # update sensor update periods
+        # we tick all the sensors based on the smallest update period (physics update period)
         if self.scene.height_scanner is not None:
             self.scene.height_scanner.update_period = self.decimation * self.sim.dt
         if self.scene.contact_forces is not None:
             self.scene.contact_forces.update_period = self.sim.dt
 
+        # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
+        # this generates terrains with increasing difficulty and is useful for training
         if getattr(self.curriculum, "terrain_levels", None) is not None:
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = True
@@ -621,12 +657,39 @@ class D1RoughEnvCfg(ManagerBasedRLEnvCfg):
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
 
-        # Removed the lines that overwrote joint_names for policy terms
-        # They were forcing all 16 joints -> conflicting with our strict 12 leg joints
+        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
 
+        # NP3O / BarlowTwins-PPO: policy obs must be 3D (B, T, D). Setting these at
+        # group level applies to every active term in the group, so callers don't
+        # need to flag each ObsTerm individually.
+        self.observations.policy.history_length = 10
+        self.observations.policy.flatten_history_dim = False
+
+        # ---------------- domain randomisation events (looser reset pose) ----------------
+        # Matches D1FlatCfg's _reset_root_states wider initial pose distribution.
+        self.events.reset_base.params = {
+            "pose_range": {
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": (0.0, 0.2),
+                "roll": (-0.0, 0.0),
+                "pitch": (-0, 0),
+                "yaw": (-3.14, 3.14),
+            },
+            "velocity_range": {
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": (-0.5, 0.5),
+                "roll": (-0.5, 0.5),
+                "pitch": (-0.5, 0.5),
+                "yaw": (-0.5, 0.5),
+            },
+        }
         self.disable_zero_weight_rewards()
 
     def disable_zero_weight_rewards(self):
+        """If the weight of rewards is 0, set rewards to None"""
         for attr in dir(self.rewards):
             if not attr.startswith("__"):
                 reward_attr = getattr(self.rewards, attr)
@@ -637,16 +700,27 @@ class D1RoughEnvCfg(ManagerBasedRLEnvCfg):
 @configclass
 class D1RoughEnvCfg_PLAY(D1RoughEnvCfg):
     def __post_init__(self):
+        # post init of parent
         super().__post_init__()
 
+        # make a smaller scene for play
         self.scene.num_envs = 50
         self.scene.env_spacing = 2.5
+        # spawn the robot randomly in the grid (instead of their terrain levels)
         self.scene.terrain.max_init_terrain_level = None
+        # reduce the number of terrains to save memory
         if self.scene.terrain.terrain_generator is not None:
             self.scene.terrain.terrain_generator.num_rows = 5
             self.scene.terrain.terrain_generator.num_cols = 5
             self.scene.terrain.terrain_generator.curriculum = False
 
+        # disable randomization for play
         self.observations.policy.enable_corruption = False
+        # remove random pushing
         self.events.base_external_force_torque = None
         self.events.push_robot = None
+
+        # # ------------------------------Commands------------------------------
+        # self.commands.base_velocity.ranges.lin_vel_x = (-0.0, 0.0)
+        # self.commands.base_velocity.ranges.lin_vel_y = (-0.0, 0.0)
+        # self.commands.base_velocity.ranges.ang_vel_z = (-0.0, 0.0)

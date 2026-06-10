@@ -24,7 +24,8 @@ from isaaclab.actuators import (  # noqa: F401
 )
 from isaaclab.assets.articulation import ArticulationCfg
 
-DDT_MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../data/robots"))
+# DDT_MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../data/robots"))
+DDT_MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../ddt_ros2_control/urdfs"))
 
 
 DDT_TITA_CFG = ArticulationCfg(
@@ -32,7 +33,7 @@ DDT_TITA_CFG = ArticulationCfg(
         fix_base=False,
         merge_fixed_joints=True,
         replace_cylinders_with_capsules=False,
-        asset_path=f"{DDT_MODEL_DIR}/tita/urdf/robot.urdf",
+        asset_path=f"{DDT_MODEL_DIR}/tita_description/urdf/robot.urdf",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -66,36 +67,22 @@ DDT_TITA_CFG = ArticulationCfg(
     ),
     soft_joint_pos_limit_factor=0.9,
     actuators={
-        # "legs": DCMotorCfg(
-        #     joint_names_expr=[".*"],
-        #     effort_limit=60.0,
-        #     saturation_effort=80.0,
-        #     velocity_limit=30.0,
-        #     stiffness=25.0,
-        #     damping=0.5,
-        #     friction=0.0,
-        # ),
-        "legs": DelayedPDActuatorCfg(
+        "legs": DCMotorCfg(
             joint_names_expr=["^(?!.*_leg_4).*"],
             effort_limit=60.0,
-            # saturation_effort=100.0,
-            velocity_limit=20.0,
-            stiffness=40.0,
-            damping=1.0,
+            saturation_effort=80.0,
+            velocity_limit=30.0,
+            stiffness=60.0,
+            damping=1.5,
             friction=0.0,
-            min_delay=0,  # physics time steps (min: 2.0*0=0.0ms)
-            max_delay=4,  # physics time steps (max: 2.0*4=8.0ms)
         ),
-        "wheels": DelayedPDActuatorCfg(
+        "wheels": ImplicitActuatorCfg(
             joint_names_expr=[".*_leg_4"],
-            effort_limit=20.0,
-            # saturation_effort=10.0,
-            velocity_limit=20.0,
+            effort_limit_sim=12.0,
+            velocity_limit_sim=30.0,
             stiffness=0.0,
             damping=0.5,
             friction=0.0,
-            min_delay=0,  # physics time steps (min: 2.0*0=0.0ms)
-            max_delay=4,  # physics time steps (max: 2.0*4=8.0ms)
         ),
     },
 )
@@ -106,7 +93,7 @@ DDT_D1_CFG = ArticulationCfg(
         fix_base=False,
         merge_fixed_joints=True,
         replace_cylinders_with_capsules=False,
-        asset_path=f"{DDT_MODEL_DIR}/d1/urdf/robot.urdf",
+        asset_path=f"{DDT_MODEL_DIR}/d1_description/urdf/robot.urdf",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -138,36 +125,44 @@ DDT_D1_CFG = ArticulationCfg(
     ),
     soft_joint_pos_limit_factor=0.9,
     actuators={
-        # "legs": DCMotorCfg(
-        #     joint_names_expr=[".*"],
-        #     effort_limit=60.0,
-        #     saturation_effort=80.0,
-        #     velocity_limit=30.0,
-        #     stiffness=25.0,
-        #     damping=0.5,
-        #     friction=0.0,
-        # ),
-        "legs": DelayedPDActuatorCfg(
+        "legs": DCMotorCfg(
             joint_names_expr=[".*(hip|thigh|calf)_joint"],
             effort_limit=60.0,
-            # saturation_effort=100.0,
+            saturation_effort=80.0,
             velocity_limit=20.0,
             stiffness=60.0,
             damping=1.5,
             friction=0.0,
-            min_delay=0,  # physics time steps (min: 2.0*0=0.0ms)
-            max_delay=4,  # physics time steps (max: 2.0*4=8.0ms)
         ),
-        "wheels": DelayedPDActuatorCfg(
+        "wheels": ImplicitActuatorCfg(
             joint_names_expr=[".*_foot_joint"],
-            effort_limit=20.0,
-            # saturation_effort=10.0,
-            velocity_limit=20.0,
+            effort_limit_sim=12.0,
+            velocity_limit_sim=30.0,
             stiffness=0.0,
             damping=0.5,
             friction=0.0,
-            min_delay=0,  # physics time steps (min: 2.0*0=0.0ms)
-            max_delay=4,  # physics time steps (max: 2.0*4=8.0ms)
         ),
+        # "legs": DelayedPDActuatorCfg(
+        #     joint_names_expr=[".*(hip|thigh|calf)_joint"],
+        #     effort_limit=60.0,
+        #     # saturation_effort=100.0,
+        #     velocity_limit=20.0,
+        #     stiffness=60.0,
+        #     damping=1.5,
+        #     friction=0.0,
+        #     min_delay=0,  # physics time steps (min: 2.0*0=0.0ms)
+        #     max_delay=4,  # physics time steps (max: 2.0*4=8.0ms)
+        # ),
+        # "wheels": DelayedPDActuatorCfg(
+        #     joint_names_expr=[".*_foot_joint"],
+        #     effort_limit=20.0,
+        #     # saturation_effort=10.0,
+        #     velocity_limit=20.0,
+        #     stiffness=0.0,
+        #     damping=0.5,
+        #     friction=0.0,
+        #     min_delay=0,  # physics time steps (min: 2.0*0=0.0ms)
+        #     max_delay=4,  # physics time steps (max: 2.0*4=8.0ms)
+        # ),
     },
 )

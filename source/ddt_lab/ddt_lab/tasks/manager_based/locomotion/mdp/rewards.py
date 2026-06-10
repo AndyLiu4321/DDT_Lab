@@ -76,6 +76,11 @@ def track_ang_vel_z_world_exp(
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
+def action_rate_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Penalize the rate of change of the actions using L2 squared kernel."""
+    reward = torch.sum(torch.square(env.action_manager.action - env.action_manager.prev_action), dim=1)
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
 
 def joint_power(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Reward joint_power"""
@@ -680,3 +685,41 @@ def flat_orientation_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = Scen
     reward = torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1)
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
+
+
+def default_joint_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Penalize joint position deviation from the default pose (sum of squares).
+
+    Port of ``LocomotionWithNP3O._reward_default_joint``. Includes the same
+    upright filter (``clamp(-grav_z, 0, 0.7) / 0.7``) so the penalty fades when
+    the robot is not roughly upright.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    q_default = asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    reward = torch.sum(torch.square(q - q_default), dim=1)
+    reward *= torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def hip_pos(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    lateral_command_index: int = 1,
+    command_threshold: float = 1.0e-6,
+) -> torch.Tensor:
+    """Penalize hip joint deviation from default — only when lateral velocity command is ~0.
+
+    Port of ``LocomotionWithNP3O.D1Flat._reward_hip_pos``: discourages hip
+    abduction when the policy is not commanded to walk sideways.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    cmd = env.command_manager.get_command(command_name)
+    flag = (cmd[:, lateral_command_index].abs() < command_threshold).float()
+
+    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    q_default = asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    reward = flag * torch.sum(torch.square(q - q_default), dim=1)
+    reward *= torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return torch.sum(torch.square(q - q_default), dim=1)

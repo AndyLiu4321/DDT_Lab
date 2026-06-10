@@ -1,93 +1,84 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+"""D1 flat-ground env, mirroring ``LocomotionWithNP3O/configs/d1/d1_flat_config.py``.
+
+Reward weights and the cost set are configured in ``rough_env_cfg.py``; this
+file only encodes flat-specific differences: terrain switched to a plane, the
+critic's height_scan disabled, terrain curriculum disabled, looser reset poses,
+and (for the play variant) zero commands + no domain randomisation.
+"""
+
 from isaaclab.utils import configclass
 
-# Import the rough terrain config as the base (it already contains the full observation, action, reward setup)
 from .rough_env_cfg import D1RoughEnvCfg
 
 
 @configclass
 class D1FlatEnvCfg(D1RoughEnvCfg):
-    """
-    Flat terrain version of the D1 locomotion task.
-    This configuration overrides only the parts necessary to switch to a flat plane
-    while preserving the same proprioceptive observation structure as the rough version
-    (history-stacked observations → 10 × ~33 → flattened 330-dimensional input).
-    """
-
     def __post_init__(self):
-        # Call parent post-init first (sets up everything from rough config)
         super().__post_init__()
 
-        # ----------------------------- Terrain -----------------------------
-        # Switch to a completely flat plane
+        # ---------------- terrain (plane, no height scan) ----------------
         self.scene.terrain.terrain_type = "plane"
-        self.scene.terrain.terrain_generator = None  # No terrain generator needed
-
-        # ----------------------------- Sensors -----------------------------
-        # Remove height scanner (no terrain perception needed on flat ground)
+        self.scene.terrain.terrain_generator = None
         self.scene.height_scanner = None
-
-        # ----------------------------- Observations -----------------------------
-        # Disable height scan term for both policy and critic
-        self.observations.policy.height_scan = None
-        self.observations.critic.height_scan = None
-
-        # IMPORTANT: Keep observation history stacking enabled.
-        # The rough config already uses history for proprioceptive terms
-        # (base_ang_vel, projected_gravity, commands, joint_pos, joint_vel, last_action).
-        # By default Isaac Lab stacks the last N steps (history_length is set in the
-        # observation manager, usually 10 in locomotion tasks). No change needed here.
-
-        # Ensure corruption (noise) is still applied during training
-        self.observations.policy.enable_corruption = True
-
-        # ----------------------------- Curriculum -----------------------------
-        # No terrain difficulty curriculum on flat ground
+        # Remove the scanner ObsGroup entirely on flat terrain — no height_scanner.
+        self.observations.scanner = None
+        # no terrain curriculum
         self.curriculum.terrain_levels = None
 
-        # Optional: you may want to keep domain randomization events (push, mass, etc.)
-        # for robustness – they are already defined in D1RoughEnvCfg and remain active.
+        # ---------------- commands (D1FlatCfg.commands.ranges) ----------------
+        # Same as reference: ±1 m/s xy linear, ±1 rad/s yaw, full heading range.
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.heading = (-3.14, 3.14)
 
-        # ----------------------------- Rewards -----------------------------
-        # (Optional) You can tweak rewards here if flat terrain makes some terms too easy.
-        # Example:
-        # self.rewards.track_lin_vel_xy_exp.weight = 4.0
-        # self.rewards.action_rate_l2.weight = -0.05
-        # Leave as-is to match rough training as closely as possible.
+        # ---------------- domain randomisation events (looser reset pose) ----------------
+        # Matches D1FlatCfg's _reset_root_states wider initial pose distribution.
+        # self.events.reset_base.params = {
+        #     "pose_range": {
+        #         "x": (-0.5, 0.5),
+        #         "y": (-0.5, 0.5),
+        #         "z": (0.0, 0.2),
+        #         "roll": (-0.785, 0.785),
+        #         "pitch": (-1.57, 1.57),
+        #         "yaw": (-3.14, 3.14),
+        #     },
+        #     "velocity_range": {
+        #         "x": (-0.5, 0.5),
+        #         "y": (-0.5, 0.5),
+        #         "z": (-0.5, 0.5),
+        #         "roll": (-0.5, 0.5),
+        #         "pitch": (-0.5, 0.5),
+        #         "yaw": (-0.5, 0.5),
+        #     },
+        # }
 
 
 @configclass
 class D1FlatEnvCfg_PLAY(D1FlatEnvCfg):
-    """
-    Play configuration for the flat terrain environment.
-    Reduces environment count and disables all randomizations for deterministic playback.
-    """
-
     def __post_init__(self) -> None:
-        # Call parent post-init
         super().__post_init__()
 
-        # Smaller scene for visualization / playback
+        # smaller scene for interactive playback
         self.scene.num_envs = 50
         self.scene.env_spacing = 2.5
 
-        # Disable observation noise
+        # disable noise / external pushes / domain rand events for stable playback
         self.observations.policy.enable_corruption = False
-
-        # Remove all domain randomization events for clean playback
         self.events.base_external_force_torque = None
         self.events.push_robot = None
         self.events.add_base_inertia = None
         self.events.add_base_com = None
         self.events.add_base_mass = None
         self.events.randomize_actuator_gains = None
-        self.events.physics_material = None
 
-        # Optional: fix commands to zero for standing test
+        # zero commands (matches D1FlatCfg_Play.commands.ranges)
         # self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
         # self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         # self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        # self.commands.base_velocity.ranges.heading = (0.0, 0.0)

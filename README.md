@@ -1,218 +1,294 @@
-# DDT_Lab 使用教程
+# ddt_lab — NP3O Locomotion for Wheel-Legged Robots
 
-## Overview
+Locomotion training for the **D1** (quadruped with wheels) and **Tita**
+(wheel-legged biped) robots, using **NP3O** (BarlowTwins-augmented
+constrained PPO) built on [Isaac Lab](https://isaac-sim.github.io/IsaacLab/).
 
-这个项目参考的是[TemplateforIsaaclabprojects](https://github.com/isaac-sim/IsaacLabExtensionTemplate).项目使用Isaaclab作为训练环境，包含有Direct drive Technology的D1和Tita机器人。
+---
 
+## Prerequisites
 
+| Dependency | Version |
+|---|---|
+| NVIDIA Isaac Sim | 5.1 |
+| Isaac Lab | [v2.3.0](https://isaac-sim.github.io/IsaacLab/v2.3.0/index.html) |
+| Python | 3.11 (bundled with Isaac Sim) |
+| CUDA | 12.x |
+
+---
 
 ## Installation
-特别注意，本项目应该在**Isaalab release/v2.3.0**和**Isaacsim 5.1** 版本中运行，其他版本暂时还没有进行适配，可以使用专门提供适配本项目的docker，后期会放出来，但是文件较大有65.8G；也可以使用官方的docker，但是需要稍微手动配置一下环境。
 
-这里给出一个安装官方环境的参考
-```
-# 要拉取最小的 Isaac Lab 容器，请运行:
+### 1. Install Isaac Lab
 
-docker pull nvcr.io/nvidia/isaac-lab:2.3.0
-```
-```
-# 要运行带有交互式 bash 会话的 Isaac Lab 容器，请运行:
+Follow the [official guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
+The conda-based install is recommended:
 
-docker run --name isaac-lab --entrypoint bash -it --gpus all -e "ACCEPT_EULA=Y" --rm --network=host \
-   -e "PRIVACY_CONSENT=Y" \
-   -v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw \
-   -v ~/docker/isaac-sim/cache/ov:/root/.cache/ov:rw \
-   -v ~/docker/isaac-sim/cache/pip:/root/.cache/pip:rw \
-   -v ~/docker/isaac-sim/cache/glcache:/root/.cache/nvidia/GLCache:rw \
-   -v ~/docker/isaac-sim/cache/computecache:/root/.nv/ComputeCache:rw \
-   -v ~/docker/isaac-sim/logs:/root/.nvidia-omniverse/logs:rw \
-   -v ~/docker/isaac-sim/data:/root/.local/share/ov/data:rw \
-   -v ~/docker/isaac-sim/documents:/root/Documents:rw \
-   nvcr.io/nvidia/isaac-lab:2.3.0
-   ```
-   ```
-# 为了通过 X11 转发启用渲染，请运行:
-
-xhost +
-docker run --name isaac-lab --entrypoint bash -it --gpus all -e "ACCEPT_EULA=Y" --rm --network=host \
-   -e "PRIVACY_CONSENT=Y" \
-   -e DISPLAY \
-   -v $HOME/.Xauthority:/root/.Xauthority \
-   -v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw \
-   -v ~/docker/isaac-sim/cache/ov:/root/.cache/ov:rw \
-   -v ~/docker/isaac-sim/cache/pip:/root/.cache/pip:rw \
-   -v ~/docker/isaac-sim/cache/glcache:/root/.cache/nvidia/GLCache:rw \
-   -v ~/docker/isaac-sim/cache/computecache:/root/.nv/ComputeCache:rw \
-   -v ~/docker/isaac-sim/logs:/root/.nvidia-omniverse/logs:rw \
-   -v ~/docker/isaac-sim/data:/root/.local/share/ov/data:rw \
-   -v ~/docker/isaac-sim/documents:/root/Documents:rw \
-   nvcr.io/nvidia/isaac-lab:2.3.0
-```
----
-参照流程 [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
-建议使用anaconda或者miniconda进行环境配置，以及使用pip进行Isaacsim的安装。为了方便起见，下面贴出对应的安装步骤，可以直接安装配置。
-
-- python环境安装，使用python3.11
-```
-conda create -n env_isaaclab python=3.11
+```bash
+# After cloning IsaacLab:
 conda activate env_isaaclab
-pip install --upgrade pip
 ```
-- 安装依赖
-```
-## Isaacsim 5.1安装
-pip install "isaacsim[all,extscache]==5.1.0" --extra-index-url https://pypi.nvidia.com
-```
-```
-## 安装torch和torchvison，一定要是这个版本
-pip install -U torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
-```
-针对不同的机器，需要根据不同的cuda版本进行安装。这里默认已经安装好显卡驱动了，终端中输`nvidia-smi`查看对应的cuda版本。如果查询到cuda版本为12.6，则在安装torch和torchvision时在终端中输入下面的指令：
-```
-pip install -U torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu126
-```
-这边建议cuda版本不要太低，否则会因为安装对应版本的torch和torchvision而不能运行代码
 
-安装完成后可输入验证安装
-```
-isaacsim
-```
-- **Isaaclab安装**
+### 2. Clone this repo (outside the IsaacLab directory)
 
-```
-git clone git@github.com:isaac-sim/IsaacLab.git
-git checkout release/2.3.0
-git pull origin release/2.3.0
-```
-上述命令可以安装并切换Isaaclab到最新的版本，且请务必保证是这个版本。
-
-```
-./isaaclab.sh --install # or "./isaaclab.sh -i"
-```
-安装训练框架。为了节省空间，可以安装rsl-rl这一个库
-```
-./isaaclab.sh --install rsl_rl
-```
-安装安成后进行验证
-```
-# Option 1: Using the isaaclab.sh executable
-# note: this works for both the bundled python and the virtual environment
-./isaaclab.sh -p scripts/tutorials/00_sim/create_empty.py
-
-# Option 2: Using python in your virtual environment
-python scripts/tutorials/00_sim/create_empty.py
-```
-到此Isaaclab的环境安装完成了
-
-conda activate isaaclab
-## Trainning
-DDT_lab提供了丰富的训练环境，首先需要安装好依赖。
-```
+```bash
+git clone https://github.com/DDTRobot/DDT_Lab/tree/np3o ddt_lab
 cd ddt_lab
+```
+
+### 3. Get robot URDF models
+
+URDF paths are controlled by `DDT_MODEL_DIR` in
+`source/ddt_lab/ddt_lab/assets/ddt_robot.py`:
+
+```python
+# source/ddt_lab/ddt_lab/assets/ddt_robot.py (line ~28)
+DDT_MODEL_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../../ddt_ros2_control/urdfs")
+)
+```
+
+This resolves to `<ddt_lab_root>/ddt_ros2_control/urdfs/` at runtime.
+
+**Default — clone `ddt_ros2_control` inside `ddt_lab`:**
+
+```bash
+# Run from the ddt_lab directory
+git clone https://github.com/DDTRobot/ddt_ros2_control.git ddt_ros2_control
+```
+
+Required layout:
+
+```
+ddt_lab/
+├── ddt_ros2_control/
+│   └── urdfs/
+│       ├── d1_description/urdf/robot.urdf
+│       ├── tita_description/urdf/robot.urdf
+│       └── ...
+├── source/
+└── scripts/
+```
+
+**Custom path** — edit `DDT_MODEL_DIR` in `ddt_robot.py` directly:
+
+```python
+DDT_MODEL_DIR = "/absolute/path/to/your/urdfs"
+```
+
+### 4. Install ddt_lab in editable mode
+
+```bash
+# Use the same Python that has Isaac Lab installed
 python -m pip install -e source/ddt_lab
 ```
-查找对应的任务。
-```
-# use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
+
+### 5. Verify installation
+
+```bash
+# Should print 8 DDT-* tasks
 python scripts/list_envs.py
 ```
-运行对应的任务。
-```
-# use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
-python scripts/rsl_rl/train.py --task=DDT-Velocity-Flat-D1-v0
-```
-注意，应根据上一步列出的任务名运行，否则会报错。同时不要使用有Play的任务进行训练，这是因为这个参数比较小，用于推理，不适合用于训练。
 
-如果在服务器上进行训练，且没有安装好图形库，可以使用**headless**和**video**两个参数
-```
-python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME> --headless --video
-```
-
-
-
-
-## dummy agents:
-这里使用没有策略的智能体来验证环境是否可以运行
-
-
-- Zero-action agent （零动作代理）
-
-    ```bash
-    # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python scripts/zero_agent.py --task=<TASK_NAME>
-    ```
-- Random-action agent （随机动作代理）
-
-    ```bash
-    # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python scripts/random_agent.py --task=test
-    <TASK_NAME>
-    ```
-
-## Evaluation
-
-为了验证训练的效果，项目默认使用tensorboard进行参数分析。在终端中确认已经安装好tensorboard后进入ddt_lab路径输入下列指令：
-```
-tensorboard --logdir ./logs
-```
-tensorboard会自动加载对应的训练参数，打开http://localhost:6006/便可以查看训练结果。
-
-除了数据验证，项目中也写了推理的脚本，进入ddt_lab路径，在终端中输入：
-```
-python scripts/rsl_rl/play.py \
-    --task DDT-Velocity-Flat-Tita-Play-v0 \
-    --num_envs 50 \
-    --checkpoint "./logs/rsl_rl/<path-to-your-file>"
+Expected output:
 
 ```
-
-其中，task输入对应的训练任务的play版本，load_run输入对应的时间日期，checkpoint输入对应的权重文件,num_envs是推理的环境数量。
-
-对于服务器推理，可以使用`--headless`和`--video`的参数进行推理。
++----------------------------------+---------------------------------+
+| Task Name                        | Config                          |
++----------------------------------+---------------------------------+
+| DDT-Velocity-Flat-D1-v0          | D1FlatEnvCfg                    |
+| DDT-Velocity-Flat-D1-Play-v0     | D1FlatEnvCfg_PLAY               |
+| DDT-Velocity-Rough-D1-v0         | D1RoughEnvCfg                   |
+| DDT-Velocity-Rough-D1-Play-v0    | D1RoughEnvCfg_PLAY              |
+| DDT-Velocity-Flat-Tita-v0        | TitaFlatEnvCfg                  |
+| DDT-Velocity-Flat-Tita-Play-v0   | TitaFlatEnvCfg_PLAY             |
+| DDT-Velocity-Rough-Tita-v0       | TitaRoughEnvCfg                 |
+| DDT-Velocity-Rough-Tita-Play-v0  | TitaRoughEnvCfg_PLAY            |
++----------------------------------+---------------------------------+
 ```
-python scripts/rsl_rl/play.py \
-    --task DDT-Velocity-Flat-Tita-Play-v0 \
-    --num_envs 50 \
-    --checkpoint "./logs/rsl_rl/<path-to-your-file>" \
-    --headless \
-    --video
-```
 
-推理完成后，在**logs/rsl_rl/\<data-data-path\>/video/play**中会有对应的推理视频，同时每次推理的onnx文件也都会保存在**logs/rsl_rl/\<robot\>/<data-data-path\>/exported/policy.onnx**
-
-### 真机部署
-
-真机部署请参考[ddt_sim2sim2real](https://github.com/DDTRobot/tita_rl_sim2sim2real)
 ---
 
-### Set up IDE (Optional)
+## Training
 
-To setup the IDE, please follow these instructions:
+```bash
+# D1 — flat ground
+python scripts/np3o/train.py --task=DDT-Velocity-Flat-D1-v0 \
+    --num_envs 4096 --headless
 
-- Run VSCode Tasks, by pressing `Ctrl+Shift+P`, selecting `Tasks: Run Task` and running the `setup_python_env` in the drop down menu.
-  When running this task, you will be prompted to add the absolute path to your Isaac Sim installation.
+# D1 — rough terrain (trimesh, terrain curriculum)
+python scripts/np3o/train.py --task=DDT-Velocity-Rough-D1-v0 \
+    --num_envs 4096 --headless
 
-If everything executes correctly, it should create a file .python.env in the `.vscode` directory.
-The file contains the python paths to all the extensions provided by Isaac Sim and Omniverse.
-This helps in indexing all the python modules for intelligent suggestions while writing code.
+# Tita — flat ground
+python scripts/np3o/train.py --task=DDT-Velocity-Flat-Tita-v0 \
+    --num_envs 4096 --headless
+```
 
-### Setup as Omniverse Extension (Optional)
+### Common flags
 
-We provide an example UI extension that will load upon enabling your extension defined in `source/ddt_lab/ddt_lab/ui_extension_example.py`.
+| Flag | Default | Description |
+|---|---|---|
+| `--num_envs` | (from cfg) | Number of parallel environments |
+| `--max_iterations` | (from cfg) | Override total training iterations |
+| `--headless` | False | Run without rendering (recommended for training) |
+| `--seed` | None | Random seed |
+| `--device` | `cuda:0` | Training device |
+| `--experiment_name` | (from cfg) | Override the log directory name |
 
-To enable your extension, follow these steps:
+### Logs
 
-1. **Add the search path of this project/repository** to the extension manager:
-    - Navigate to the extension manager using `Window` -> `Extensions`.
-    - Click on the **Hamburger Icon**, then go to `Settings`.
-    - In the `Extension Search Paths`, enter the absolute path to the `source` directory of this project/repository.
-    - If not already present, in the `Extension Search Paths`, enter the path that leads to Isaac Lab's extension directory directory (`IsaacLab/source`)
-    - Click on the **Hamburger Icon**, then click `Refresh`.
+Checkpoints and TensorBoard events are written to:
 
-2. **Search and enable your extension**:
-    - Find your extension under the `Third Party` category.
-    - Toggle it to enable your extension.
+```
+logs/np3o/<experiment_name>/<YYYY-MM-DD_HH-MM-SS>/
+├── model_<iter>.pt      # policy checkpoint
+├── params/
+│   ├── env.yaml         # environment config snapshot
+│   └── agent.yaml       # algorithm config snapshot
+├── git/
+│   ├── ddt_lab.diff     # git diff at training start
+│   └── rsl_rl.diff
+└── events.out.tfevents… # TensorBoard
+```
+
+### Monitor training
+
+```bash
+tensorboard --logdir logs/np3o
+```
+
+Key metrics to watch:
+
+| Metric | Healthy sign |
+|---|---|
+| `Train/mean_reward` | Steadily increasing |
+| `Policy/mean_noise_std` | Gradually decreases from 1.0 → ~0.5, doesn't collapse to 0 |
+| `Loss/surrogate` | Negative, small magnitude |
+| `Loss/mean_imitation_loss` | Decreasing (BarlowTwins SSL converging) |
+| `Mean episode cost_*` | Decreasing toward 0 |
+
+---
+
+## Resume training
+
+```bash
+python scripts/np3o/train.py --task=DDT-Velocity-Flat-D1-v0 \
+    --num_envs 4096 --headless \
+    --resume \
+    --load_run ".*" \
+    --load_checkpoint "model_.*\.pt"
+```
+
+---
+
+## Play / Evaluate
+
+```bash
+# Auto-resolves the latest checkpoint under logs/np3o/d1_flat/
+python scripts/np3o/play.py --task=DDT-Velocity-Flat-D1-Play-v0
+
+# Load a specific checkpoint
+python scripts/np3o/play.py --task=DDT-Velocity-Flat-D1-Play-v0 \
+    --checkpoint /path/to/model_5000.pt
+
+# Export JIT + ONNX policy and exit (no rollout)
+python scripts/np3o/play.py --task=DDT-Velocity-Flat-D1-Play-v0 \
+    --export_policy \
+    --export_dir /tmp/d1_deploy
+```
+
+Exported policy inputs (ONNX):
+
+| Input | Shape | Description |
+|---|---|---|
+| `nn_input0` | `(1, n_proprio)` | Current proprio observation |
+| `nn_input1` | `(1, history_len, n_proprio)` | Full history buffer |
+
+Output:
+
+| Output | Shape | Description |
+|---|---|---|
+| `nn_output` | `(1, n_actions)` | Deterministic action mean |
+
+---
+
+## Sanity-check environments
+
+These scripts require no RL libraries — useful to verify env setup:
+
+```bash
+python scripts/zero_agent.py --task=DDT-Velocity-Flat-D1-v0
+python scripts/random_agent.py --task=DDT-Velocity-Flat-D1-v0
+```
+
+---
+
+## Available robots & tasks
+
+| Robot | Description | Flat task | Rough task |
+|---|---|---|---|
+| **D1** | Quadruped with wheel feet | `DDT-Velocity-Flat-D1-v0` | `DDT-Velocity-Rough-D1-v0` |
+| **Tita** | Wheel-legged biped | `DDT-Velocity-Flat-Tita-v0` | `DDT-Velocity-Rough-Tita-v0` |
+
+`*-Play-v0` variants use 50 envs, zero commands, no domain randomization — for visualization.
+
+---
+
+## Algorithm overview (NP3O)
+
+NP3O extends PPO with:
+
+- **BarlowTwins SSL** — a self-supervised history encoder learns to predict
+  velocity from proprio history, giving the actor implicit state estimation
+  without extra privileged obs at inference time.
+- **Constrained optimization** — optional cost terms (joint limits, torque
+  limits, etc.) are enforced via a Lagrangian multiplier that grows during
+  training.
+- **Privileged critic** — critic sees physical parameters (contact state,
+  kp/kd randomization factors) invisible to the policy, improving value
+  estimates during training only.
+
+Key config files:
+
+```
+source/ddt_lab/ddt_lab/
+├── algorithms/np3o/           # NP3O algorithm, BarlowTwins actor-critic, runner
+├── managers/cost_manager.py   # CostManager + CostTermCfg
+└── tasks/manager_based/locomotion/
+    ├── mdp/                   # reward / cost / obs functions
+    └── robots/
+        ├── d1/
+        │   ├── rough_env_cfg.py    # full D1 env config (rewards, costs, domain rand)
+        │   ├── flat_env_cfg.py     # D1 flat override (plane terrain, no height scan)
+        │   └── agents/np3o_cfg.py  # D1-specific training hyperparameters
+        └── tita/
+            ├── rough_env_cfg.py
+            ├── flat_env_cfg.py
+            └── agents/np3o_cfg.py
+```
+
+---
+
+## Adding a new cost term
+
+```python
+# rough_env_cfg.py — add to CostsCfg
+from ddt_lab.managers import CostTermCfg
+
+@configclass
+class CostsCfg:
+    pos_limit = CostTermCfg(
+        func=mdp.joint_pos_limit,
+        scale=1.0, d_value=0.0, k_value=0.01,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[...])},
+    )
+    # Add more terms here — CostManager auto-detects them
+```
+
+Remove the `costs` field entirely to fall back to PPO + BarlowTwins (no constraints).
+
+---
 
 ## Code formatting
 
@@ -230,6 +306,19 @@ pre-commit run --all-files
 ```
 
 ## Troubleshooting
+
+**`FileNotFoundError` / URDF not found at startup**
+
+`ddt_robot.py` looks for URDFs at `<ddt_lab_root>/ddt_ros2_control/urdfs/`.
+Make sure `ddt_ros2_control` is cloned inside `ddt_lab` (step 3):
+
+```bash
+git clone https://github.com/DDTRobot/ddt_ros2_control.git ddt_ros2_control
+ls ddt_ros2_control/urdfs/    # should list d1_description/, tita_description/, etc.
+```
+
+If the URDF directory is somewhere else, edit `DDT_MODEL_DIR` directly in
+`source/ddt_lab/ddt_lab/assets/ddt_robot.py`.
 
 ### Pylance Missing Indexing of Extensions
 
