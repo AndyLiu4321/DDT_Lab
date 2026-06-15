@@ -6,6 +6,7 @@ import math
 
 import ddt_lab.tasks.manager_based.locomotion.mdp as mdp
 import isaaclab.sim as sim_utils
+from ddt_lab.managers import CostTermCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
@@ -494,6 +495,10 @@ class RewardsCfg:
     )
     # -- optional penalties
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
+    upward = RewTerm(func=mdp.upward, weight=0.0)
+    # CartPole-style survival signal (disabled by default; enabled in recovery env)
+    alive = RewTerm(func=mdp.is_alive, weight=0.0)
+    is_terminated = RewTerm(func=mdp.is_terminated, weight=0.0)
     # dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
     base_height_l2 = RewTerm(
         func=mdp.base_height_l2,
@@ -524,6 +529,37 @@ class CurriculumCfg:
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
 
 
+@configclass
+class CostsCfg:
+    """NP3O cost terms — guard hardware limits during constrained training.
+
+    Detected by ``IsaacLabNP3OWrapper``; drop this attribute to fall back to
+    PPO+BarlowTwins (zero-cost placeholder).
+    """
+
+    joint_pos_limit = CostTermCfg(
+        func=mdp.joint_pos_limit,
+        scale=1.0,
+        d_value=0.0,
+        k_value=0.01,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_leg_(1|2|3)"])},
+    )
+    joint_vel_limit = CostTermCfg(
+        func=mdp.joint_vel_limit,
+        scale=1.0,
+        d_value=0.0,
+        k_value=0.01,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
+    )
+    joint_torque_limit = CostTermCfg(
+        func=mdp.joint_torque_limit,
+        scale=1.0,
+        d_value=0.0,
+        k_value=0.01,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
+    )
+
+
 ##
 # Environment configuration
 ##
@@ -544,6 +580,7 @@ class TitaRoughEnvCfg(ManagerBasedRLEnvCfg):
     terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
+    costs: CostsCfg = CostsCfg()
 
     def __post_init__(self):
         """Post initialization."""
