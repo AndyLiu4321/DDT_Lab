@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Tita fall-recovery env (flat terrain, NP3O constrained).
+"""Mini fall-recovery env (flat terrain, NP3O constrained).
 
 Design philosophy — adapted from gym_np3o/legged_robot.py:
 
@@ -11,34 +11,36 @@ Design philosophy — adapted from gym_np3o/legged_robot.py:
   ────────────────────────────────────────────────────────────
   * base_contact termination is REMOVED so the robot experiences the
     fallen state and must learn to self-right.
-  * base_contact_penalty (-2.0/step) fires every step the base is on
-    the ground — analogous to legged_robot._reward_termination but
-    continuous rather than one-shot.
-  * upward (+1.0) provides a dense linear-style recovery gradient:
-    larger when more upright.
+  * base_contact_raw (-2.0/step): base contact penalty WITHOUT the
+    uprightness filter, so it fires even when fully inverted.
+  * upward (+1.0): quadratic (1-g_z)², large gradient when nearly upright.
+  * upright_progress (+2.0): linear -g_z, CONSTANT gradient everywhere
+    including at g_z=+1 (fully inverted dead zone where upward → 0).
+  * inverted_ang_vel_bonus (+0.5): rewards angular velocity scaled by how
+    inverted the robot is → encourages aggressive rolling to escape inversion.
   * flat_orientation_l2 (-5.0) and base_height_l2 (-10.0) maintain
     the orientation and height signal throughout the episode.
   * Velocity-tracking rewards are suppressed (weight=0) — impossible
     to follow speed commands while fallen, and the conflicting gradient
     slows recovery.
 
-Reset: full ±90° roll/pitch so roughly half the episodes start on
-the robot's side, requiring active recovery.
+Reset: roll ±180°, pitch ±90° — covers all orientations including
+fully inverted (g_z=+1), which the original ±90°/±90° could miss.
 """
 
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.utils import configclass  # noqa: F401 — resolved at runtime via Isaac Lab install
 
 import ddt_lab.tasks.manager_based.locomotion.mdp as mdp
-from .flat_env_cfg import TitaFlatEnvCfg
-from .rough_env_cfg import TitaRoughEnvCfg
+from .flat_env_cfg import MiniFlatEnvCfg
+from .rough_env_cfg import MiniRoughEnvCfg
 
 _90_DEG = 1.5708  # radians
 
 
 @configclass
-class TitaRecoveryEnvCfg(TitaFlatEnvCfg):
-    """Tita flat-terrain fall-recovery environment."""
+class MiniRecoveryEnvCfg(MiniFlatEnvCfg):
+    """Mini flat-terrain fall-recovery environment."""
 
     def __post_init__(self):
         super().__post_init__()
@@ -57,7 +59,7 @@ class TitaRecoveryEnvCfg(TitaFlatEnvCfg):
                 "x": (-0.5, 0.5),
                 "y": (-0.5, 0.5),
                 "z": (0.05, 0.5),
-                "roll":  (-_90_DEG, _90_DEG),
+                "roll":  (-3.14, 3.14),   # ±180°: covers fully inverted (was ±90°)
                 "pitch": (-_90_DEG, _90_DEG),
                 "yaw":   (-3.14, 3.14),
             },
@@ -77,53 +79,48 @@ class TitaRecoveryEnvCfg(TitaFlatEnvCfg):
 
         # ── 恢复核心信号（始终有效）─────────────────────────────────────────
 
-        # 【接触惩罚】base_link 每帧接触地面扣 2 分，但不重置 episode
-        # 参考 gym_np3o/legged_robot._reward_termination（连续版本）
-        # 函数: mdp.undesired_contacts
-        #   → ddt_lab/tasks/manager_based/locomotion/mdp/rewards.py:665
-        self.rewards.base_contact_penalty.weight = -2.0
+        # 【原始接触惩罚】无过滤版：完全翻倒时 undesired_contacts 的
+        # clamp(-g_z,0,0.7)/0.7 过滤器会把惩罚归零，这里用无过滤版
+        # 确保翻倒时 base 接触地面依然产生梯度
+        self.rewards.base_contact_raw.weight = -2.0
 
-        # 【站立奖励】(1 - g_z)^2：站直时 4，侧躺时 1，倒扣时 0
-        # 提供密集的"站起来"梯度信号
-        # 函数: mdp.upward
-        #   → ddt_lab/tasks/manager_based/locomotion/mdp/rewards.py:608
+        # 【线性恢复梯度】-g_z ∈ [-1, +1]：在任意姿态都有常数梯度 -1
+        # 解决 upward=(1-g_z)² 在 g_z=+1 时梯度归零的死区问题
+        # 完全翻倒时给出 -1 惩罚，驱动机器人向减小 g_z 的方向运动
+        self.rewards.upright_progress.weight = 2.0
+
+        # 【二次站立奖励】(1 - g_z)²：站直时 4，侧躺时 1，倒扣时 0
+        # 与 upright_progress 组合，接近站立时给出更强的二次梯度
         self.rewards.upward.weight = 1.0
 
+        # 【翻倒角速度奖励】翻倒越深奖励越大的角速度，鼓励做激进翻滚动作
+        # inverted_weight = clamp(g_z, 0, 1)，完全翻倒时权重最大
+        self.rewards.inverted_ang_vel_bonus.weight = 0.5
+
         # 【姿态惩罚】惩罚重力投影在 xy 方向的偏移，迫使机身保持水平
-        # = -5.0 * sum(projected_gravity_b[:2]^2)，站直时接近 0
-        # 函数: mdp.flat_orientation_l2
-        #   → ddt_lab/tasks/manager_based/locomotion/mdp/rewards.py:678
+        # 注：此项有过滤器，翻倒时会减弱，由 upright_progress 补偿
         self.rewards.flat_orientation_l2.weight = -5.0
 
         # 【高度惩罚】惩罚质心高度偏离目标 0.35 m，防止机器人方向对了但贴地趴
-        # = -10.0 * (height - 0.35)^2，比正常训练的 -2.0 强 5 倍
-        # 函数: mdp.base_height_l2
-        #   → ddt_lab/tasks/manager_based/locomotion/mdp/rewards.py:616
         self.rewards.base_height_l2.weight = -10.0
+
+        # 【原始接触惩罚（旧版）】有过滤器版保持关闭，改用 base_contact_raw
+        self.rewards.base_contact_penalty.weight = 0.0
 
         # ── 屏蔽与恢复无关的速度指令信号 ──────────────────────────────────
 
-        # 【线速度跟踪】倒地时无法执行速度指令，保留会产生矛盾梯度 → 关闭
-        # 函数: mdp.track_lin_vel_xy_exp
-        #   → ddt_lab/tasks/manager_based/locomotion/mdp/rewards.py:24
         self.rewards.track_lin_vel_xy_exp.weight = 0.0
-
-        # 【角速度跟踪】同上 → 关闭
-        # 函数: mdp.track_ang_vel_z_exp
-        #   → ddt_lab/tasks/manager_based/locomotion/mdp/rewards.py:40
         self.rewards.track_ang_vel_z_exp.weight = 0.0
 
         # ── CartPole 风格存活信号（无实际终止条件时无效，保持关闭）────────
 
-        # 函数: isaaclab.envs.mdp.is_alive / is_terminated
-        #   → IsaacLab/source/isaaclab/isaaclab/envs/mdp/rewards.py:31,36
         self.rewards.alive.weight = 0.0
         self.rewards.is_terminated.weight = 0.0
 
 
 @configclass
-class TitaRecoveryRoughEnvCfg(TitaRoughEnvCfg):
-    """Tita 崎岖地形摔倒恢复环境。
+class MiniRecoveryRoughEnvCfg(MiniRoughEnvCfg):
+    """Mini 崎岖地形摔倒恢复环境。
 
     与 Flat 版本的唯一区别：保留粗糙地形（摩擦/高度随机性），
     但禁用高度扫描传感器，使观测维度与 Flat 版完全一致（critic=54），
@@ -134,7 +131,7 @@ class TitaRecoveryRoughEnvCfg(TitaRoughEnvCfg):
         super().__post_init__()
 
         # ------------------------------------------------------------------ #
-        # 关闭 scanner：与 TitaFlatEnvCfg 对齐                               #
+        # 关闭 scanner：与 MiniFlatEnvCfg 对齐                               #
         # 原因：                                                               #
         #   1. 禁用后 critic 维度从 241 降回 54，与 Flat 版一致               #
         #   2. 不再需要 scan_encoder，可直接加载 Flat checkpoint              #
@@ -165,7 +162,7 @@ class TitaRecoveryRoughEnvCfg(TitaRoughEnvCfg):
                 "x": (-0.5, 0.5),
                 "y": (-0.5, 0.5),
                 "z": (0.05, 0.5),
-                "roll":  (-_90_DEG, _90_DEG),
+                "roll":  (-3.14, 3.14),   # ±180°: covers fully inverted
                 "pitch": (-_90_DEG, _90_DEG),
                 "yaw":   (-3.14, 3.14),
             },
@@ -180,24 +177,27 @@ class TitaRecoveryRoughEnvCfg(TitaRoughEnvCfg):
         }
 
         # ------------------------------------------------------------------ #
-        # 奖励函数配置（与平地恢复版完全一致）                                 #
+        # 奖励函数配置（与平地恢复版一致，含翻倒死区修复）                     #
         # ------------------------------------------------------------------ #
 
-        # 【接触惩罚】base_link 每帧触地扣 2 分，不重置
-        # 函数: mdp.undesired_contacts → mdp/rewards.py:665
-        self.rewards.base_contact_penalty.weight = -2.0  # -2.0 → -0.5
+        # 【原始接触惩罚】无过滤版，翻倒时依然产生梯度
+        self.rewards.base_contact_raw.weight = -2.0
+        self.rewards.base_contact_penalty.weight = 0.0  # 关闭有过滤器的旧版
 
-        # 【站立奖励】(1 - g_z)^2：站直时 4，侧躺时 1，倒扣时 0
-        # 函数: mdp.upward → mdp/rewards.py:608
+        # 【线性恢复梯度】任意姿态恒定梯度，解决完全翻倒时梯度归零问题
+        self.rewards.upright_progress.weight = 2.0
+
+        # 【二次站立奖励】接近直立时提供更强梯度
         self.rewards.upward.weight = 1.0
 
-        # 【姿态惩罚】惩罚重力投影 xy 分量偏移
-        # 函数: mdp.flat_orientation_l2 → mdp/rewards.py:678
-        self.rewards.flat_orientation_l2.weight = -1.0 # -5.0 → -1.0
+        # 【翻倒角速度奖励】翻倒越深越鼓励大幅翻滚动作
+        self.rewards.inverted_ang_vel_bonus.weight = 0.5
 
-        # 【高度惩罚】惩罚质心偏离目标 0.35m，防止方向对了但贴地趴
-        # 函数: mdp.base_height_l2 → mdp/rewards.py:616
-        self.rewards.base_height_l2.weight = -7.0   # -10.0 → -2.0
+        # 【姿态惩罚】有过滤器，翻倒时减弱，由 upright_progress 补偿
+        self.rewards.flat_orientation_l2.weight = -1.0
+
+        # 【高度惩罚】防止方向对了但贴地趴
+        self.rewards.base_height_l2.weight = -7.0
 
         # 【速度指令】倒地时无法跟踪，关闭避免梯度冲突
         self.rewards.track_lin_vel_xy_exp.weight = 0.0
@@ -209,7 +209,7 @@ class TitaRecoveryRoughEnvCfg(TitaRoughEnvCfg):
 
 
 @configclass
-class TitaRecoveryRoughEnvCfg_PLAY(TitaRecoveryRoughEnvCfg):
+class MiniRecoveryRoughEnvCfg_PLAY(MiniRecoveryRoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
@@ -230,7 +230,7 @@ class TitaRecoveryRoughEnvCfg_PLAY(TitaRecoveryRoughEnvCfg):
 
 
 @configclass
-class TitaRecoveryEnvCfg_PLAY(TitaRecoveryEnvCfg):
+class MiniRecoveryEnvCfg_PLAY(MiniRecoveryEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 

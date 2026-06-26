@@ -26,7 +26,7 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 # Pre-defined configs
 ##
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
-from ddt_lab.assets.ddt_robot import DDT_TITA_CFG  # isort: skip
+from ddt_lab.assets.ddt_robot import DDT_MINI_6DOT_CFG  # isort: skip
 
 ##
 # Scene definition
@@ -57,7 +57,7 @@ class SceneCfg(InteractiveSceneCfg):
         debug_vis=False,
     )
     # robots
-    robot: ArticulationCfg = DDT_TITA_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot: ArticulationCfg = DDT_MINI_6DOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
     # sensors
     height_scanner = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base_link",
@@ -114,16 +114,9 @@ class CommandsCfg:
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    # joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], scale=0.5, use_default_offset=True, preserve_order=True)
+    # Note: robot_6dot.urdf has joint_left_leg_1 and joint_right_leg_1 as fixed joints
+    # Only 6 controllable joints: left/right leg 2,3,4
     joint_pos_0 = mdp.JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["joint_left_leg_1"],
-        clip={".*": (-100.0, 100.0)},
-        scale=0.25,
-        use_default_offset=True,
-        preserve_order=True,
-    )
-    joint_pos_1 = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["joint_left_leg_2"],
         clip={".*": (-100.0, 100.0)},
@@ -131,7 +124,7 @@ class ActionsCfg:
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_pos_2 = mdp.JointPositionActionCfg(
+    joint_pos_1 = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["joint_left_leg_3"],
         clip={".*": (-100.0, 100.0)},
@@ -139,7 +132,7 @@ class ActionsCfg:
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_vel_3 = mdp.JointVelocityActionCfg(
+    joint_vel_2 = mdp.JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["joint_left_leg_4"],
         clip={".*": (-100.0, 100.0)},
@@ -147,15 +140,7 @@ class ActionsCfg:
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_pos_4 = mdp.JointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["joint_right_leg_1"],
-        clip={".*": (-100.0, 100.0)},
-        scale=0.25,
-        use_default_offset=True,
-        preserve_order=True,
-    )
-    joint_pos_5 = mdp.JointPositionActionCfg(
+    joint_pos_3 = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["joint_right_leg_2"],
         clip={".*": (-100.0, 100.0)},
@@ -163,7 +148,7 @@ class ActionsCfg:
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_pos_6 = mdp.JointPositionActionCfg(
+    joint_pos_4 = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["joint_right_leg_3"],
         clip={".*": (-100.0, 100.0)},
@@ -171,7 +156,7 @@ class ActionsCfg:
         use_default_offset=True,
         preserve_order=True,
     )
-    joint_vel_7 = mdp.JointVelocityActionCfg(
+    joint_vel_5 = mdp.JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["joint_right_leg_4"],
         clip={".*": (-100.0, 100.0)},
@@ -515,6 +500,16 @@ class RewardsCfg:
             "target_height": 0.35,
         },
     )
+    # Recovery-only: linear recovery gradient (non-zero even when fully inverted)
+    upright_progress = RewTerm(func=mdp.upright_progress, weight=0.0)
+    # Recovery-only: angular velocity bonus when inverted (encourage thrashing)
+    inverted_ang_vel_bonus = RewTerm(func=mdp.inverted_ang_vel_bonus, weight=0.0)
+    # Recovery-only: base contact penalty without uprightness filter
+    base_contact_raw = RewTerm(
+        func=mdp.undesired_contacts_raw,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base_link"]), "threshold": 1.0},
+    )
 
 
 @configclass
@@ -572,7 +567,7 @@ class CostsCfg:
 
 
 @configclass
-class TitaRoughEnvCfg(ManagerBasedRLEnvCfg):
+class MiniRoughEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings
@@ -630,7 +625,7 @@ class TitaRoughEnvCfg(ManagerBasedRLEnvCfg):
 
 
 @configclass
-class TitaRoughEnvCfg_PLAY(TitaRoughEnvCfg):
+class MiniRoughEnvCfg_PLAY(MiniRoughEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()

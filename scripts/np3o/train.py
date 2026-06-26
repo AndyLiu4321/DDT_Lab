@@ -93,11 +93,18 @@ def main():
     runner.add_git_repo_to_log(__file__)
 
     if runner_cfg['runner'].get('resume'):
-        resume_path = get_checkpoint_path(
-            log_root,
-            runner_cfg['runner']['load_run'],
-            runner_cfg['runner']['load_checkpoint'],
-        )
+        load_checkpoint = runner_cfg['runner'].get('load_checkpoint', '.*')
+        # 如果 load_checkpoint 是绝对路径且文件存在，直接使用；
+        # 否则走 get_checkpoint_path 在 log_root 下按 regex 搜索。
+        # 这样可以跨实验加载（如把 tita_flat 的 checkpoint 续训到 tita_rough）。
+        if os.path.isabs(load_checkpoint) and os.path.isfile(load_checkpoint):
+            resume_path = load_checkpoint
+        else:
+            resume_path = get_checkpoint_path(
+                log_root,
+                runner_cfg['runner'].get('load_run', '.*'),
+                load_checkpoint,
+            )
         print(f'[INFO] Loading checkpoint: {resume_path}')
         runner.load(resume_path)
 

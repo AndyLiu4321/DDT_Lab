@@ -131,7 +131,7 @@
       <material name="black"/>
     </visual>
   </link>
-  <joint name="joint_left_leg_1" type="revolute">
+  <joint name="joint_left_leg_1" type="fixed">
     <origin rpy="1.5708 0 1.5708" xyz="0 0.0895 0"/>
     <parent link="base_link"/>
     <child link="left_leg_1"/>
@@ -233,7 +233,7 @@
       <material name="black"/>
     </visual>
   </link>
-  <joint name="joint_right_leg_1" type="revolute">
+  <joint name="joint_right_leg_1" type="fixed">
     <origin rpy="1.5708 0 1.5708" xyz="0 -0.0895 0"/>
     <parent link="base_link"/>
     <child link="right_leg_1"/>

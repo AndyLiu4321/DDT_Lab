@@ -131,7 +131,7 @@
       <material name="black"/>
     </visual>
   </link>
-  <joint name="joint_left_leg_1" type="revolute">
+  <joint name="joint_left_leg_1" type="fixed">
     <origin rpy="1.5708 0 1.5708" xyz="0 0.0895 0"/>
     <parent link="base_link"/>
     <child link="left_leg_1"/>
@@ -212,7 +212,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="joint_left_leg_4" type="revolute">
+  <joint name="joint_left_leg_4" type="fixed">
     <origin rpy="0 0 0" xyz="0.2 0 0.0514"/>
     <parent link="left_leg_3"/>
     <child link="left_leg_4"/>
@@ -233,7 +233,7 @@
       <material name="black"/>
     </visual>
   </link>
-  <joint name="joint_right_leg_1" type="revolute">
+  <joint name="joint_right_leg_1" type="fixed">
     <origin rpy="1.5708 0 1.5708" xyz="0 -0.0895 0"/>
     <parent link="base_link"/>
     <child link="right_leg_1"/>
@@ -314,7 +314,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="joint_right_leg_4" type="revolute">
+  <joint name="joint_right_leg_4" type="fixed">
     <origin rpy="0 0 0" xyz="0.2 0 -0.0514"/>
     <parent link="right_leg_3"/>
     <child link="right_leg_4"/>

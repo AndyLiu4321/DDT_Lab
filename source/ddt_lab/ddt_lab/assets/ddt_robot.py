@@ -166,3 +166,109 @@ DDT_D1_CFG = ArticulationCfg(
         # ),
     },
 )
+
+
+DDT_MINI_4DOT_CFG = ArticulationCfg(
+    spawn=sim_utils.UrdfFileCfg(
+        fix_base=False,
+        merge_fixed_joints=False,
+        replace_cylinders_with_capsules=False,
+        asset_path=f"{DDT_MODEL_DIR}/tita_description/urdf/robot_4dot.urdf",
+        activate_contact_sensors=True,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            retain_accelerations=False,
+            linear_damping=0.0,
+            angular_damping=0.0,
+            max_linear_velocity=1000.0,
+            max_angular_velocity=1000.0,
+            max_depenetration_velocity=1.0,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False, solver_position_iteration_count=4, solver_velocity_iteration_count=0
+        ),
+        joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
+            gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=0, damping=0)
+        ),
+    ),
+    init_state=ArticulationCfg.InitialStateCfg(
+        pos=(0.0, 0.0, 0.40),
+        joint_pos={
+            "joint_left_leg_2": 0.8,
+            "joint_left_leg_3": -1.5,
+            "joint_right_leg_2": 0.8,
+            "joint_right_leg_3": -1.5,
+        },
+        joint_vel={".*": 0.0},
+    ),
+    soft_joint_pos_limit_factor=0.9,
+    actuators={
+        "legs": DCMotorCfg(
+            joint_names_expr=[".*_leg_(2|3)"],
+            effort_limit=60.0,
+            saturation_effort=80.0,
+            velocity_limit=15.0,
+            stiffness=60.0,
+            damping=1.5,
+            friction=0.0,
+        ),
+    },
+)
+
+
+DDT_MINI_6DOT_CFG = ArticulationCfg(
+    spawn=sim_utils.UrdfFileCfg(
+        fix_base=False,
+        merge_fixed_joints=True,
+        replace_cylinders_with_capsules=False,
+        asset_path=f"{DDT_MODEL_DIR}/tita_description/urdf/robot_6dot.urdf",
+        activate_contact_sensors=True,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            retain_accelerations=False,
+            linear_damping=0.0,
+            angular_damping=0.0,
+            max_linear_velocity=1000.0,
+            max_angular_velocity=1000.0,
+            max_depenetration_velocity=1.0,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False, solver_position_iteration_count=4, solver_velocity_iteration_count=0
+        ),
+        joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
+            gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=0, damping=0)
+        ),
+    ),
+    init_state=ArticulationCfg.InitialStateCfg(
+        pos=(0.0, 0.0, 0.40),
+        joint_pos={
+            "joint_left_leg_2": 0.8,
+            "joint_left_leg_3": -1.5,
+            "joint_left_leg_4": 0.0,
+            "joint_right_leg_2": 0.8,
+            "joint_right_leg_3": -1.5,
+            "joint_right_leg_4": 0.0,
+        },
+        joint_vel={".*": 0.0},
+    ),
+    soft_joint_pos_limit_factor=0.9,
+    actuators={
+        "legs": DCMotorCfg(
+            joint_names_expr=[".*_leg_(2|3)"],
+            effort_limit=60.0,
+            saturation_effort=80.0,
+            velocity_limit=30.0,
+            stiffness=60.0,
+            damping=1.5,
+            friction=0.0,
+        ),
+        "wheels": ImplicitActuatorCfg(
+            joint_names_expr=[".*_leg_4"],
+            effort_limit_sim=12.0,
+            velocity_limit_sim=30.0,
+            stiffness=0.0,
+            damping=0.5,
+            friction=0.0,
+        ),
+    },
+)

@@ -290,9 +290,32 @@ class OnConstraintPolicyRunner:
 
     def load(self, path, load_optimizer=True):
         loaded_dict = torch.load(path, map_location=self.device)
-        self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
+        ckpt_sd = loaded_dict['model_state_dict']
+        model_sd = self.alg.actor_critic.state_dict()
+
+        # Drop keys whose tensor shape changed (obs-dim expansions, etc.)
+        filtered, skipped = {}, []
+        for k, v in ckpt_sd.items():
+            if k in model_sd and model_sd[k].shape != v.shape:
+                skipped.append(f"{k}: ckpt{list(v.shape)} → model{list(model_sd[k].shape)}")
+            else:
+                filtered[k] = v
+
+        if skipped:
+            print(f"[runner] load: skipping {len(skipped)} shape-mismatched tensors "
+                  f"(will be randomly initialised):")
+            for s in skipped:
+                print(f"  {s}")
+
+        missing, unexpected = self.alg.actor_critic.load_state_dict(filtered, strict=False)
+        if missing:
+            print(f"[runner] load: {len(missing)} keys not in checkpoint (randomly initialised).")
+
         if load_optimizer:
-            self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
+            try:
+                self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
+            except (ValueError, KeyError):
+                print("[runner] load: optimizer state skipped (param groups changed).")
         return loaded_dict.get('infos')
 
     def get_inference_policy(self, device=None):

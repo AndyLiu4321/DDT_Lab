@@ -53,6 +53,26 @@ gym.register(
 )
 
 gym.register(
+    id="DDT-Recovery-Rough-Tita-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": recovery_env_cfg.TitaRecoveryRoughEnvCfg,
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:tita_rough_np3o_runner_cfg",
+    },
+)
+
+gym.register(
+    id="DDT-Recovery-Rough-Tita-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": recovery_env_cfg.TitaRecoveryRoughEnvCfg_PLAY,
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:tita_rough_np3o_runner_cfg",
+    },
+)
+
+gym.register(
     id="DDT-Recovery-Flat-Tita-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,

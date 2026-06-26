@@ -23,6 +23,37 @@ if TYPE_CHECKING:
     from isaaclab.envs import RLTaskEnv
 
 
+def terrain_levels_recovery(
+    env: RLTaskEnv,
+    env_ids: Sequence[int],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Terrain curriculum for fall-recovery training — distance-based criterion.
+
+    Episode ends → for each env compute:
+
+        distance  = ||robot_xy - grid_origin_xy||
+
+        move_up   = distance > terrain_size / 2          (walked past halfway)
+        move_down = distance < |cmd_vel| × T × 0.5       (walked less than half of expected)
+
+    terrain_level += move_up - move_down   (clamped to [0, max_level])
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    terrain: TerrainImporter = env.scene.terrain
+    command = env.command_manager.get_command("base_velocity")
+
+    distance = torch.norm(
+        asset.data.root_pos_w[env_ids, :2] - env.scene.env_origins[env_ids, :2], dim=1
+    )
+    move_up = distance > terrain.cfg.terrain_generator.size[0] / 2
+    move_down = distance < torch.norm(command[env_ids, :2], dim=1) * env.max_episode_length_s * 0.5
+    move_down &= ~move_up
+
+    terrain.update_env_origins(env_ids, move_up, move_down)
+    return torch.mean(terrain.terrain_levels.float())
+
+
 def terrain_levels_vel(
     env: RLTaskEnv, env_ids: Sequence[int], asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:

@@ -40,6 +40,20 @@ def phase(env: ManagerBasedRLEnv, cycle_time: float) -> torch.Tensor:
     return phase_tensor
 
 
+def biped_phase(env: ManagerBasedRLEnv, cycle_time: float) -> torch.Tensor:
+    """Per-foot gait phase clock for alternating biped gait.
+
+    Returns 4 values: [sin_L, cos_L, sin_R, cos_R].
+    Left and right feet are half a cycle apart (phase offset = π).
+    """
+    t = env.episode_length_buf.float() * env.step_dt  # (B,)
+    phi_L = 2.0 * torch.pi * t / cycle_time            # left foot phase
+    phi_R = phi_L + torch.pi                            # right foot: half cycle offset
+    return torch.stack(
+        [torch.sin(phi_L), torch.cos(phi_L), torch.sin(phi_R), torch.cos(phi_R)], dim=-1
+    )
+
+
 # ---------------------------------------------------------------------------
 # Privileged observation terms (critic-only)
 # Mirrors the reference ``LocomotionWithNP3O`` priv_latent subset that can be
