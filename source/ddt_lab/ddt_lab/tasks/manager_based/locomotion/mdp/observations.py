@@ -107,3 +107,24 @@ def joint_kd_factor(
     kd = asset.data.joint_damping[:, asset_cfg.joint_ids]
     default_kd = asset.data.default_joint_damping[:, asset_cfg.joint_ids]
     return (kd / (default_kd.abs() + 1e-6)).clamp(0.0, 2.0)
+
+
+def jump_stage(env: ManagerBasedRLEnv, command_name: str = "jump_cmd") -> torch.Tensor:
+    """Normalized jump FSM stage for privileged observations."""
+    term = env.command_manager.get_term(command_name)
+    return (term.jump_stage.float() / float(term.STAGE_LAND)).unsqueeze(1)
+
+
+def jump_state(env: ManagerBasedRLEnv, command_name: str = "jump_cmd") -> torch.Tensor:
+    """Privileged jump FSM state: stage, was_in_flight, has_jumped, normalized max height."""
+    term = env.command_manager.get_term(command_name)
+    target_height = getattr(term.cfg, "target_height", 0.8)
+    return torch.stack(
+        [
+            term.jump_stage.float() / float(term.STAGE_LAND),
+            term.was_in_flight.float(),
+            term.has_jumped.float(),
+            term.max_height / max(target_height, 1.0e-6),
+        ],
+        dim=1,
+    )

@@ -273,11 +273,14 @@ python scripts/np3o/train.py \
   --num_envs 4096 \
   --max_iterations 20000 \
   --resume \
-  --load_checkpoint "/home/htw/ddt_lab/logs/np3o/mini_flat/2026-06-26_11-48-16/model_3000.pt"
+  --load_checkpoint "/home/htw/ddt_lab/logs/np3o/mini_jump/2026-06-29_15-18-55/model_3000.pt"
 python scripts/np3o/train.py --task DDT-Biped-Flat-Mini-v0 --num_envs 4096
 
-
-
+python scripts/np3o/play.py \
+  --task DDT-jump-Flat-Mini-Play-v0 \
+  --num_envs 50 \
+  --keyboard \
+  --checkpoint "/home/htw/ddt_lab/logs/np3o/mini_jump/2026-07-02_17-26-41/model_2800.pt"
 ### Mini 回放
 
 ```bash

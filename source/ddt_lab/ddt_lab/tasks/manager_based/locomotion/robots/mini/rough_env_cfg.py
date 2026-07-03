@@ -510,6 +510,43 @@ class RewardsCfg:
         weight=0.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base_link"]), "threshold": 1.0},
     )
+    # Jump phase rewards (disabled by default; enabled in MiniJumpFlatEnvCfg)
+    jump_before_setting = RewTerm(
+        func=mdp.jump_before_setting,
+        weight=0.0,
+        params={
+            "crouch_height": 0.25,
+            "sigma": 0.04,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"]),
+        },
+    )
+    lin_vel_z_jump = RewTerm(
+        func=mdp.lin_vel_z_jump,
+        weight=0.0,
+        params={
+            "max_vel": 10.0,
+            "require_in_air": True,   # set False in jump env for ground-phase gradient
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"]),
+        },
+    )
+    jump_flight_height = RewTerm(
+        func=mdp.jump_flight_height,
+        weight=0.0,
+        params={
+            "base_height": 0.35,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"]),
+        },
+    )
+    jump_land_stability = RewTerm(
+        func=mdp.jump_land_stability,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"])},
+    )
+    jump_land_orientation = RewTerm(
+        func=mdp.jump_land_orientation,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"])},
+    )
 
 
 @configclass

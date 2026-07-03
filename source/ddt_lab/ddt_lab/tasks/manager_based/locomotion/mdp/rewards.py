@@ -942,3 +942,167 @@ def undesired_contacts_raw(
         torch.max(torch.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1), dim=1)[0] > threshold
     )
     return torch.sum(is_contact, dim=1).float()
+
+
+# ---------------------------------------------------------------------------
+# Jump phase rewards — stage-gated by foot contact state
+# ---------------------------------------------------------------------------
+# Contact gating convention (all functions):
+#   on_ground = any(current_contact_time[:, feet] > 0)
+#   in_air    = all(current_contact_time[:, feet] == 0)
+# ---------------------------------------------------------------------------
+
+
+def _jump_term(env: ManagerBasedRLEnv, command_name: str | None):
+    if command_name is None:
+        return None
+    if command_name not in env.command_manager.active_terms:
+        return None
+    return env.command_manager.get_term(command_name)
+
+
+def jump_before_setting(
+    env: ManagerBasedRLEnv,
+    crouch_height: float = 0.25,
+    sigma: float = 0.04,
+    command_name: str | None = None,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Stage 0 — reward crouching/蓄力 pose when on ground.
+
+    Gaussian bell centred at crouch_height (below normal standing ≈ 0.35 m).
+    Returns exp(-((h - crouch_height)^2) / (2*sigma^2)) ∈ (0, 1] when on ground.
+    Use with positive weight to incentivise lowering the COM before takeoff.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    on_ground = torch.any(
+        contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0, dim=1
+    )
+    height = asset.data.root_pos_w[:, 2]
+    reward = torch.exp(-((height - crouch_height) ** 2) / (2.0 * sigma ** 2))
+    term = _jump_term(env, command_name)
+    if term is not None:
+        prep_mask = term.jump_stage == term.STAGE_PREP
+        return prep_mask.float() * on_ground.float() * reward
+    return on_ground.float() * reward
+
+
+def lin_vel_z_jump(
+    env: ManagerBasedRLEnv,
+    max_vel: float = 10.0,
+    require_in_air: bool = True,
+    command_name: str | None = None,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Stage 1 — reward upward world-z velocity.
+
+    When require_in_air=True (default): fires only when all feet are off the ground.
+    When require_in_air=False: fires always — use during early jump training to
+    provide a non-zero gradient toward takeoff even from ground contact.
+    Returns clamp(vel_z_world, 0, max_vel).
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    vel_z = asset.data.root_lin_vel_w[:, 2]
+    reward = torch.clamp(vel_z, 0.0, max_vel)
+    term = _jump_term(env, command_name)
+    if term is not None:
+        active_jump = (term.jump_stage == term.STAGE_TAKEOFF) | (term.jump_stage == term.STAGE_FLIGHT)
+        return reward * active_jump.float()
+    if require_in_air:
+        contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+        in_air = torch.all(
+            contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] == 0.0, dim=1
+        )
+        reward = reward * in_air.float()
+    return reward
+
+
+def jump_flight_height(
+    env: ManagerBasedRLEnv,
+    base_height: float = 0.35,
+    command_name: str | None = None,
+    target_height: float | None = None,
+    min_height: float = 0.42,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Stage 2 — reward COM height above base_height during flight.
+
+    Returns max(h - base_height, 0) when all feet are off the ground.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    term = _jump_term(env, command_name)
+    if term is not None:
+        target = target_height if target_height is not None else term.cfg.target_height
+        window_steps = int(term.cfg.flight_reward_window_s / env.step_dt)
+        in_reward_window = (term.jump_stage == term.STAGE_FLIGHT) & (term.flight_reward_timer <= window_steps)
+        above_takeoff = asset.data.root_pos_w[:, 2] > min_height
+        height_progress = torch.clamp(
+            (asset.data.root_pos_w[:, 2] - base_height) / max(target - base_height, 1.0e-6),
+            0.0,
+            1.0,
+        )
+        target_bonus = torch.exp(-torch.abs(asset.data.root_pos_w[:, 2] - target) * 5.0)
+        return in_reward_window.float() * above_takeoff.float() * (12.0 * height_progress + 4.0 * target_bonus)
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    in_air = torch.all(
+        contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] == 0.0, dim=1
+    )
+    height = asset.data.root_pos_w[:, 2]
+    return in_air.float() * torch.clamp(height - base_height, 0.0, None)
+
+
+def jump_land_stability(
+    env: ManagerBasedRLEnv,
+    command_name: str | None = None,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Stage 3 — return angular velocity magnitude when on ground. Use with NEGATIVE weight.
+
+    Penalises tumbling on landing. Fires when at least one foot is in contact.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    on_ground = torch.any(
+        contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0, dim=1
+    )
+    ang_vel_mag = torch.norm(asset.data.root_ang_vel_b, dim=1)
+    term = _jump_term(env, command_name)
+    if term is not None:
+        return (
+            torch.exp(-torch.sum(torch.square(asset.data.root_ang_vel_b[:, :2]), dim=1))
+            * (term.jump_stage == term.STAGE_LAND).float()
+            * on_ground.float()
+        )
+    return on_ground.float() * ang_vel_mag
+
+
+def jump_land_orientation(
+    env: ManagerBasedRLEnv,
+    command_name: str | None = None,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Stage 3 — reward upright orientation (1-g_z)^2 when on ground.
+
+    Use with positive weight to reinforce landing upright. Fires when at least
+    one foot is in contact.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    on_ground = torch.any(
+        contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0, dim=1
+    )
+    term = _jump_term(env, command_name)
+    if term is not None:
+        return (
+            torch.exp(-torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1))
+            * (term.jump_stage == term.STAGE_LAND).float()
+            * on_ground.float()
+        )
+    reward = torch.square(1.0 - asset.data.projected_gravity_b[:, 2])
+    return on_ground.float() * reward
