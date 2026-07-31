@@ -113,7 +113,7 @@ python scripts/np3o/train.py \
   --headless
 ```
 ```bash
-python scripts/np3o/train.py --task DDT-Recovery-Flat-Tita-v0 --num_envs 4096
+python scripts/np3o/train.py --task DDT-Recovery-Flat-Tita-v0 --num_envs 4096 --max_iterations 20000
 python scripts/np3o/train.py --task DDT-Recovery-Rough-Tita-v0 --num_envs 4096   --max_iterations 20000
 python scripts/np3o/train.py \
   --task DDT-Recovery-Rough-Tita-v0 \
@@ -133,7 +133,7 @@ python scripts/np3o/play.py \
 python scripts/np3o/play.py \
   --task DDT-Recovery-Flat-Tita-Play-v0  \
   --num_envs 50 \
-  --checkpoint "/home/htw/ddt_lab/logs/np3o/tita_rough/2026-06-17_09-13-06/model_600.pt" 
+  --checkpoint "/home/htw/ddt_lab/logs/np3o/tita_flat/2026-06-16_14-37-15/model_3000.pt" 
 ```
 ### Tita Rough 回放
 
@@ -141,18 +141,18 @@ python scripts/np3o/play.py \
 python scripts/np3o/play.py \
   --task DDT-Velocity-Rough-Tita-Play-v0 \
   --num_envs 50 \
-  --checkpoint "/home/htw/ddt_lab/logs/np3o/tita_rough/2026-06-11_17-43-15/model_20000.pt" \
+  --checkpoint "/home/htw/ddt_lab/logs/np3o/tita_rough/2026-06-17_15-55-43/model_10000.pt" \
   --termination_stage 1 \
+  --keyboard \
   --headless \
   --video
 python scripts/np3o/play.py \
   --task DDT-Velocity-Rough-Tita-Play-v0 \
   --num_envs 50 \
-  --checkpoint "/home/htw/ddt_lab/logs/np3o/tita_rough/2026-06-15_15-17-59/model_18500.pt" \
+  --checkpoint "/home/htw/ddt_lab/logs/np3o/tita_rough/2026-06-17_15-55-43/model_16500.pt" \
 
 
 ```
-/home/htw/ddt_lab/logs/np3o/tita_rough/2026-06-15_15-17-59/model_18500.pt
 
 ### D1 Rough 训练
 
@@ -171,7 +171,7 @@ python scripts/np3o/train.py \
 python scripts/np3o/play.py \
   --task DDT-Velocity-Rough-D1-Play-v0 \
   --num_envs 50 \
-  --checkpoint "/home/htw/ddt_lab/logs/np3o/d1_rough/2026-06-09_15-20-40/model_2600.pt" \
+  --checkpoint "/home/htw/ddt_lab/logs/np3o/d1_rough/2026-06-10_18-01-40/model_13000.pt" \
   --headless \
   --video
 ```
@@ -244,13 +244,6 @@ python scripts/np3o/train.py --task=DDT-Velocity-Flat-Mini-v0 \
   --headless
 ```
 
-### Mini Gait Flat 训练（sin 步态）
-
-```bash
-python scripts/np3o/train.py --task=DDT-Velocity-Flat-Mini-Gait-v0 \
-  --num_envs 4096 \
-  --headless
-```
 
 ### Mini Rough 训练
 
@@ -264,9 +257,36 @@ python scripts/np3o/train.py --task=DDT-Velocity-Rough-Mini-v0 \
 
 ```bash
 python scripts/np3o/train.py --task=DDT-Recovery-Flat-Mini-v0 \
-  --num_envs 4096
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --headless
+python scripts/np3o/play.py \
+  --task DDT-Recovery-Flat-Mini-Play-v0 \
+  --num_envs 50 \
+  --keyboard \
+
+python scripts/np3o/train.py --task=DDT-Recovery-Rough-Mini-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --headless
+python scripts/np3o/play.py \
+  --task DDT-Recovery-Rough-Mini-Play-v0 \
+  --num_envs 50 \
+  --keyboard \
+  --checkpoint "/home/htw/ddt_lab/logs/np3o/mini_rough/2026-07-23_08-55-41/model_10000.pt"
 ```
-python scripts/np3o/train.py --task=DDT-Recovery-Flat-Mini-v0   --num_envs 4096
+### Mini Flat play（6DOT 设计）
+
+```bash
+python scripts/np3o/play.py \
+  --task DDT-jump-Flat-Mini-Play-v0 \
+  --num_envs 50 \
+  --keyboard \
+  --checkpoint "/home/htw/ddt_lab/logs/np3o/mini_jump/2026-07-03_11-42-49/model_5400.pt" \
+
+
+```
+
 
 python scripts/np3o/train.py \
   --task DDT-jump-Flat-Mini-v0 \
@@ -280,12 +300,105 @@ python scripts/np3o/play.py \
   --task DDT-jump-Flat-Mini-Play-v0 \
   --num_envs 50 \
   --keyboard \
-  --checkpoint "/home/htw/ddt_lab/logs/np3o/mini_jump/2026-07-02_17-26-41/model_2800.pt"
+  --checkpoint "/home/htw/ddt_lab/logs/np3o/mini_jump/2026-07-03_11-42-49/model_4000.pt"
+
+
+python scripts/np3o/train.py \
+  --task DDT-CommandGated-Flat-Tita-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --headless
+python scripts/np3o/play.py   \
+  --task DDT-CommandGated-Flat-Tita-Play-v0   \
+  --keyboard \
+  --num_envs 100  
+ --max_iterations 20000 
 ### Mini 回放
 
 ```bash
 python scripts/np3o/play.py \
   --task DDT-Recovery-Flat-Mini-Play-v0 \
   --num_envs 50 \
-  --checkpoint "/path/to/model.pt"
+  --keyboard \
+  --checkpoint "/home/htw/ddt_lab/logs/np3o/mini_flat/2026-07-14_10-04-08/model_1700.pt" 
 ```
+### Mini Flat play
+
+```bash
+python scripts/np3o/play.py --task=DDT-Velocity-Flat-Mini-Play-v0 \
+  --num_envs 406 \
+  --headless
+```
+
+cd /home/htw/ddt_lab
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 launch rl_controller sim_mujoco.launch.py robot:=tita6
+
+cd /home/htw/ddt_lab
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 run keyboard_controller keyboard_controller_node
+
+
+### sim2sim
+```bash
+# 只验证 MuJoCo + PD 链路
+conda activate isaaclab
+python scripts/sim2sim/tita_mujoco_demo.py --headless --duration 2
+
+# 用 NP3O command-gated policy 做 sim2sim，平地前进
+python scripts/sim2sim/tita_mujoco_demo.py \
+  --policy logs/np3o/tita_command_gated_flat/2026-07-09_10-13-00/exported/policy.pt \
+  --profile command_gated \
+  --vx 0 \
+  --disable-scene-obstacles
+# python scripts/sim2sim/tita_mujoco_demo.py \
+#   --policy logs/np3o/tita_flat/2026-06-18_14-11-30/exported/policy.pt \
+#   --profile command_gated \
+#   --vx 0.4 \
+#   --disable-scene-obstacles
+
+python scripts/np3o/train.py \
+  --task DDT-jump-Flat-Tita-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --headless
+
+  python scripts/np3o/play.py \
+  --task DDT-jump-Flat-Tita-Play-v0 \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/tita_jump/2026-07-16_17-31-02/model_2000.pt \
+  --num_envs 100 \
+  --keyboard
+
+
+
+
+python scripts/np3o/train.py \
+  --task DDT-Stairs-Mini-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --resume \
+  --load_checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-28_13-47-16/model_2000.pt \
+  --load_run "2026-06-11_10-40-47" \
+  --headless \
+
+
+python scripts/np3o/play.py \
+  --task DDT-Stairs-Mini-Play-v0 \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-28_13-47-16/model_2000.pt \
+  --num_envs 100 \
+  --keyboard
+python scripts/np3o/play.py \
+  --task DDT-Stairs-Mini-Play-v0 \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-29_10-16-57/model_4000.pt \
+  --num_envs 100 \
+  --keyboard
+python scripts/np3o/play.py \
+  --task DDT-Stairs-Mini-Play-v0 \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-29_16-15-11/model_3400.pt \
+  --num_envs 100 \
+  --keyboard
+  

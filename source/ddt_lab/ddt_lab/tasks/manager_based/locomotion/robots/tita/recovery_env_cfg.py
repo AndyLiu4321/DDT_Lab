@@ -72,6 +72,11 @@ class TitaRecoveryEnvCfg(TitaFlatEnvCfg):
         }
 
         # ------------------------------------------------------------------ #
+        # Command: keep the same base_velocity interface as locomotion/play,  #
+        # but start with a conservative forward-speed range like Mini jump.   #
+        # ------------------------------------------------------------------ #
+
+        # ------------------------------------------------------------------ #
         # 奖励函数配置                                                        #
         # ------------------------------------------------------------------ #
 
@@ -109,6 +114,8 @@ class TitaRecoveryEnvCfg(TitaFlatEnvCfg):
         self.rewards.track_lin_vel_xy_exp.weight = 0.0
 
         # 【角速度跟踪】同上 → 关闭
+
+        # 【角速度跟踪】先关闭，只训练站起后的线速度；稳定后再逐步打开
         # 函数: mdp.track_ang_vel_z_exp
         #   → ddt_lab/tasks/manager_based/locomotion/mdp/rewards.py:40
         self.rewards.track_ang_vel_z_exp.weight = 0.0

@@ -5,7 +5,7 @@
 
 import gymnasium as gym
 
-from . import agents, flat_env_cfg, jump_env_cfg, recovery_env_cfg, rough_env_cfg
+from . import agents, flat_env_cfg, jump_env_cfg, recovery_env_cfg, rough_env_cfg, stairs_env_cfg
 
 ##
 # Register Gym environments. All Mini tasks are wired to NP3O (BarlowTwins-PPO).
@@ -68,6 +68,26 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": recovery_env_cfg.MiniRecoveryRoughEnvCfg_PLAY,
         "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:mini_rough_np3o_runner_cfg",
+    },
+)
+
+gym.register(
+    id="DDT-Stairs-Mini-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": stairs_env_cfg.MiniStairsEnvCfg,
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:mini_stairs_np3o_runner_cfg",
+    },
+)
+
+gym.register(
+    id="DDT-Stairs-Mini-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": stairs_env_cfg.MiniStairsEnvCfg_PLAY,
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:mini_stairs_np3o_runner_cfg",
     },
 )
 

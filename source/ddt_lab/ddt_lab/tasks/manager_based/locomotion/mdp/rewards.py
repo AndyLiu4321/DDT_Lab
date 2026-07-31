@@ -50,6 +50,7 @@ def track_ang_vel_z_exp(
     return reward
 
 
+
 def track_lin_vel_xy_yaw_frame_exp(
     env, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -75,6 +76,116 @@ def track_ang_vel_z_world_exp(
     reward = torch.exp(-ang_vel_error / std**2)
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
+
+
+def tracking_lin_x_vel_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Track commanded forward velocity for the 6-D wheel-legged command."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    error = torch.square(env.command_manager.get_command(command_name)[:, 0] - asset.data.root_lin_vel_b[:, 0])
+    return torch.exp(-error / sigma)
+
+
+def tracking_lin_y_vel_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Track commanded lateral velocity. Weight can be zero for non-holonomic robots."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    error = torch.square(env.command_manager.get_command(command_name)[:, 1] - asset.data.root_lin_vel_b[:, 1])
+    return torch.exp(-error / sigma)
+
+
+def tracking_ang_vel_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Track commanded yaw velocity for the 6-D wheel-legged command."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    error = torch.square(env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_b[:, 2])
+    return torch.exp(-error / sigma)
+
+
+def tracking_leg_length_thigh_l2(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Genesis-compatible first port: track thigh joint positions as leg length commands."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    cmd = env.command_manager.get_command(command_name)
+    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    return torch.square(q[:, 0] - cmd[:, 3]) + torch.square(q[:, 1] - cmd[:, 4])
+
+
+def tsk_hip_tracking_l2(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    opposite_sign: bool = False,
+) -> torch.Tensor:
+    """Track side-impact / lateral hip command with squared error."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    cmd = env.command_manager.get_command(command_name)[:, 5]
+    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    right_target = -cmd if opposite_sign else cmd
+    return torch.square(q[:, 0] - cmd) + torch.square(q[:, 1] - right_target)
+
+
+def similar_calf_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Penalize left/right calf joint mismatch."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    return torch.square(q[:, 0] - q[:, 1])
+
+
+def action_rate_l2_slice(env: ManagerBasedRLEnv, start: int, end: int) -> torch.Tensor:
+    """Penalize action change for a contiguous action slice."""
+    action = env.action_manager.action[:, start:end]
+    prev_action = env.action_manager.prev_action[:, start:end]
+    return torch.sum(torch.square(action - prev_action), dim=1)
+
+
+def feet_distance_range_l2(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    min_distance: float,
+    max_distance: float,
+) -> torch.Tensor:
+    """Penalize two wheel-feet being too close or too far apart."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    foot_pos = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
+    distance = torch.norm(foot_pos[:, 0, :] - foot_pos[:, 1, :], dim=-1)
+    return torch.clamp(min_distance - distance, 0.0, 1.0) + torch.clamp(distance - max_distance, 0.0, 1.0)
+
+
+def projected_gravity_xy_l2_raw(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Raw Genesis-style body tilt penalty: projected_gravity_x^2 + projected_gravity_y^2."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1)
+
+
+def lin_vel_z_l2_raw(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Raw z-axis base linear velocity penalty."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.square(asset.data.root_lin_vel_b[:, 2])
+
+
+def ang_vel_xy_l2_raw(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Raw roll/pitch base angular velocity penalty."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.sum(torch.square(asset.data.root_ang_vel_b[:, :2]), dim=1)
 
 def action_rate_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Penalize the rate of change of the actions using L2 squared kernel."""
@@ -924,6 +1035,44 @@ def inverted_ang_vel_bonus(
     inverted_weight = torch.clamp(g_z, 0.0, 1.0)  # 0 upright → 1 fully inverted
     ang_vel_magnitude = torch.norm(asset.data.root_ang_vel_b, dim=1)
     return inverted_weight * ang_vel_magnitude
+
+
+def inverted_leg_swing_momentum(
+    env: ManagerBasedRLEnv,
+    momentum_scale: float,
+    contact_force_threshold: float,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Reward leg-swing angular momentum only while the inverted base touches ground.
+
+    The momentum is computed from every selected leg body's motion relative to
+    the base COM.  Therefore translating or rotating the whole robot cannot
+    earn this reward by itself; the policy must swing the legs relative to the
+    body.  The roll/pitch component is bounded to ``[0, 1]`` with ``tanh``.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+
+    leg_pos = asset.data.body_com_pos_w[:, asset_cfg.body_ids, :]
+    leg_vel = asset.data.body_com_lin_vel_w[:, asset_cfg.body_ids, :]
+    base_pos = asset.data.root_com_pos_w[:, None, :]
+    base_vel = asset.data.root_com_lin_vel_w[:, None, :]
+    masses = asset.data.default_mass[:, asset_cfg.body_ids, None].to(
+        device=leg_vel.device, dtype=leg_vel.dtype
+    )
+
+    relative_pos = leg_pos - base_pos
+    relative_momentum = masses * (leg_vel - base_vel)
+    angular_momentum = torch.cross(relative_pos, relative_momentum, dim=-1).sum(dim=1)
+    roll_pitch_momentum = torch.norm(angular_momentum[:, :2], dim=1)
+    swing_reward = torch.tanh(roll_pitch_momentum / max(momentum_scale, 1.0e-6))
+
+    base_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    peak_base_force = torch.max(torch.norm(base_forces, dim=-1), dim=1)[0]
+    base_in_contact = torch.any(peak_base_force > contact_force_threshold, dim=1)
+    inverted_weight = torch.clamp(asset.data.projected_gravity_b[:, 2], 0.0, 1.0)
+    return swing_reward * inverted_weight * base_in_contact.float()
 
 
 def undesired_contacts_raw(

@@ -5,12 +5,32 @@
 
 import gymnasium as gym
 
-from . import agents, flat_env_cfg, recovery_env_cfg, rough_env_cfg
+from . import agents, command_gated_flat_env_cfg, flat_env_cfg, jump_env_cfg, recovery_env_cfg, rough_env_cfg
 
 ##
 # Register Gym environments. All Tita tasks are wired to NP3O (BarlowTwins-PPO);
 # stock PPO is no longer supported because the policy obs is now 3D.
 ##
+
+gym.register(
+    id="DDT-CommandGated-Flat-Tita-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": command_gated_flat_env_cfg.TitaCommandGatedFlatEnvCfg,
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:tita_command_gated_flat_np3o_runner_cfg",
+    },
+)
+
+gym.register(
+    id="DDT-CommandGated-Flat-Tita-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": command_gated_flat_env_cfg.TitaCommandGatedFlatEnvCfg_PLAY,
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:tita_command_gated_flat_np3o_runner_cfg",
+    },
+)
 
 gym.register(
     id="DDT-Velocity-Flat-Tita-v0",
@@ -49,6 +69,26 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": rough_env_cfg.TitaRoughEnvCfg_PLAY,
         "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:tita_rough_np3o_runner_cfg",
+    },
+)
+
+gym.register(
+    id="DDT-jump-Flat-Tita-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": jump_env_cfg.TitaJumpFlatEnvCfg,
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:tita_jump_np3o_runner_cfg",
+    },
+)
+
+gym.register(
+    id="DDT-jump-Flat-Tita-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": jump_env_cfg.TitaJumpFlatEnvCfg_PLAY,
+        "np3o_cfg_entry_point": f"{agents.__name__}.np3o_cfg:tita_jump_np3o_runner_cfg",
     },
 )
 

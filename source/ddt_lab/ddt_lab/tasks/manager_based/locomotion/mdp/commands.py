@@ -215,3 +215,112 @@ class JumpCommandCfg(CommandTermCfg):
     play_mode: bool = False
     play_trigger_steps: int = 250
     manual_mode: bool = False
+
+
+class WheelLeggedCommand(CommandTerm):
+    """Six-dimensional command for Tita wheel-legged locomotion.
+
+    Layout:
+    ``[vx, vy, wz, left_leg_length_cmd, right_leg_length_cmd, tsk_cmd]``.
+    The leg-length entries intentionally mirror the Genesis first port and
+    are consumed as thigh-joint targets by the reward terms.
+    """
+
+    cfg: "WheelLeggedCommandCfg"
+
+    def __init__(self, cfg: "WheelLeggedCommandCfg", env):
+        super().__init__(cfg, env)
+        self.asset: Articulation = env.scene[cfg.asset_cfg.name]
+        self.command_buf = torch.zeros(self.num_envs, 6, device=self.device)
+        self.metrics["lin_x_error"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["ang_z_error"] = torch.zeros(self.num_envs, device=self.device)
+
+    @property
+    def command(self) -> torch.Tensor:
+        return self.command_buf
+
+    def _update_metrics(self):
+        self.metrics["lin_x_error"] = torch.abs(self.command_buf[:, 0] - self.asset.data.root_lin_vel_b[:, 0])
+        self.metrics["ang_z_error"] = torch.abs(self.command_buf[:, 2] - self.asset.data.root_ang_vel_b[:, 2])
+
+    def _resample_command(self, env_ids: Sequence[int]):
+        if isinstance(env_ids, slice):
+            env_ids = torch.arange(self.num_envs, device=self.device)
+        elif not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+        if len(env_ids) == 0:
+            return
+
+        vx_low, vx_high = self._scaled_symmetric_range(self.cfg.lin_vel_x_range, self.cfg.lin_vel_x_curriculum_ratio)
+        wz_low, wz_high = self._scaled_symmetric_range(self.cfg.ang_vel_z_range, self.cfg.ang_vel_z_curriculum_ratio)
+
+        self.command_buf[env_ids, 0] = self._uniform(vx_low, vx_high, len(env_ids))
+        self.command_buf[env_ids, 1] = self._uniform(*self.cfg.lin_vel_y_range, len(env_ids))
+
+        if self.cfg.high_speed:
+            safe_vx = torch.clamp(torch.abs(self.command_buf[env_ids, 0]), min=1.0e-4)
+            angv_limit = self.cfg.inverse_linx_angv / safe_vx
+            local_wz_low = torch.clamp(torch.full_like(angv_limit, wz_low), min=-angv_limit, max=angv_limit)
+            local_wz_high = torch.clamp(torch.full_like(angv_limit, wz_high), min=-angv_limit, max=angv_limit)
+            rand = torch.rand(len(env_ids), device=self.device)
+            self.command_buf[env_ids, 2] = local_wz_low + rand * (local_wz_high - local_wz_low)
+
+            safe_wz = torch.clamp(torch.abs(self.command_buf[env_ids, 2]), min=1.0e-4)
+            tsk_std = self.cfg.inverse_tsk / safe_wz
+            tsk = torch.randn(len(env_ids), device=self.device) * tsk_std
+            self.command_buf[env_ids, 5] = torch.clamp(tsk, *self.cfg.tsk_range)
+
+            leg_mean = self._uniform(*self.cfg.leg_length_range, len(env_ids))
+            leg_std = self.cfg.inverse_leg_length / safe_wz
+            left_leg = leg_mean + torch.randn(len(env_ids), device=self.device) * leg_std
+            right_leg = leg_mean + torch.randn(len(env_ids), device=self.device) * leg_std
+            self.command_buf[env_ids, 3] = torch.clamp(left_leg, *self.cfg.leg_length_range)
+            self.command_buf[env_ids, 4] = torch.clamp(right_leg, *self.cfg.leg_length_range)
+        else:
+            self.command_buf[env_ids, 2] = self._uniform(wz_low, wz_high, len(env_ids))
+            self.command_buf[env_ids, 3] = self._uniform(*self.cfg.leg_length_range, len(env_ids))
+            self.command_buf[env_ids, 4] = self._uniform(*self.cfg.leg_length_range, len(env_ids))
+            self.command_buf[env_ids, 5] = self._uniform(*self.cfg.tsk_range, len(env_ids))
+
+        if self.cfg.zero_stable:
+            stop_mask = torch.rand(len(env_ids), device=self.device) < self.cfg.zero_command_probability
+            if torch.any(stop_mask):
+                self.command_buf[env_ids[stop_mask], :3] = 0.0
+
+    def _update_command(self):
+        # First version keeps fixed sampling ranges. Curriculum range updates can
+        # be added here or via a CurriculumTerm using the logged tracking errors.
+        pass
+
+    def _uniform(self, low: float, high: float, n: int) -> torch.Tensor:
+        return torch.empty(n, device=self.device).uniform_(low, high)
+
+    @staticmethod
+    def _scaled_symmetric_range(full_range: tuple[float, float], ratio: float) -> tuple[float, float]:
+        if ratio >= 1.0:
+            return full_range
+        low, high = full_range
+        if low < 0.0 < high:
+            return low * ratio, high * ratio
+        return low, low + (high - low) * ratio
+
+
+@configclass
+class WheelLeggedCommandCfg(CommandTermCfg):
+    class_type: type = WheelLeggedCommand
+
+    resampling_time_range: tuple[float, float] = (3.0, 3.0)
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    lin_vel_x_range: tuple[float, float] = (-2.0, 2.0)
+    lin_vel_y_range: tuple[float, float] = (0.0, 0.0)
+    ang_vel_z_range: tuple[float, float] = (-12.0, 12.0)
+    leg_length_range: tuple[float, float] = (0.0, 1.0)
+    tsk_range: tuple[float, float] = (-0.3, 0.3)
+    high_speed: bool = True
+    inverse_linx_angv: float = 1.0
+    inverse_tsk: float = 2.0
+    inverse_leg_length: float = 2.0
+    zero_stable: bool = True
+    zero_command_probability: float = 0.02
+    lin_vel_x_curriculum_ratio: float = 0.3
+    ang_vel_z_curriculum_ratio: float = 0.05

@@ -515,6 +515,64 @@ class RewardsCfg:
             "target_height": 0.35,
         },
     )
+    # Recovery terms. Disabled for normal Tita locomotion and enabled by the
+    # jump/recovery subclasses. These use the same MDP functions as Mini.
+    upright_progress = RewTerm(func=mdp.upright_progress, weight=0.0)
+    inverted_ang_vel_bonus = RewTerm(func=mdp.inverted_ang_vel_bonus, weight=0.0)
+    inverted_leg_swing_momentum = RewTerm(
+        func=mdp.inverted_leg_swing_momentum,
+        weight=0.0,
+        params={
+            "momentum_scale": 0.25,
+            "contact_force_threshold": 1.0,
+            "asset_cfg": SceneEntityCfg("robot", body_names=[".*_leg_(1|2|3|4)"]),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base_link"]),
+        },
+    )
+    base_contact_raw = RewTerm(
+        func=mdp.undesired_contacts_raw,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base_link"]), "threshold": 1.0},
+    )
+
+    # Stage-gated jump terms. The contact bodies are the two wheel links for
+    # both Mini 6DOT and Tita 8DOT; only the inherited action space differs.
+    jump_before_setting = RewTerm(
+        func=mdp.jump_before_setting,
+        weight=0.0,
+        params={
+            "crouch_height": 0.25,
+            "sigma": 0.04,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"]),
+        },
+    )
+    lin_vel_z_jump = RewTerm(
+        func=mdp.lin_vel_z_jump,
+        weight=0.0,
+        params={
+            "max_vel": 10.0,
+            "require_in_air": True,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"]),
+        },
+    )
+    jump_flight_height = RewTerm(
+        func=mdp.jump_flight_height,
+        weight=0.0,
+        params={
+            "base_height": 0.35,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"]),
+        },
+    )
+    jump_land_stability = RewTerm(
+        func=mdp.jump_land_stability,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"])},
+    )
+    jump_land_orientation = RewTerm(
+        func=mdp.jump_land_orientation,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"])},
+    )
 
 
 @configclass

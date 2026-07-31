@@ -15,10 +15,19 @@ class MiniFlatEnvCfg(MiniRoughEnvCfg):
         super().__post_init__()
 
         # override rewards
-        # self.rewards.flat_orientation_l2.weight = -5.0
-        # self.rewards.dof_torques_l2.weight = -2.5e-5
+        # Keep the flat velocity task anchored in a stable upright pose.  The
+        # rough parent leaves these recovery-style terms disabled so jump and
+        # recovery tasks can choose their own balance, but plain mini_flat needs
+        # an always-on posture signal or long training can drift from a good
+        # locomotion policy into base-contact resets.
+        self.rewards.flat_orientation_l2.weight = -5.0
+        self.rewards.base_height_l2.weight = -10.0
+        self.rewards.upward.weight = 1.0
+        self.rewards.upright_progress.weight = 2.0
+        self.rewards.inverted_ang_vel_bonus.weight = 0.0
+        self.rewards.base_contact_raw.weight = 0.0
+        self.rewards.base_contact_penalty.weight = 0.0
 
-        # self.rewards.feet_air_time.weight = 0.5
         # change terrain to flat
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None

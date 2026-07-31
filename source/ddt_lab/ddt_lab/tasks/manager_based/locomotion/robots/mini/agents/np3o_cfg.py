@@ -29,6 +29,13 @@ def mini_rough_np3o_runner_cfg() -> dict:
     return cfg
 
 
+def mini_stairs_np3o_runner_cfg() -> dict:
+    cfg = base_np3o_runner_cfg()
+    cfg["runner"]["experiment_name"] = "mini_stairs"
+    cfg["runner"]["max_iterations"] = 5000
+    return cfg
+
+
 def mini_jump_np3o_runner_cfg() -> dict:
     cfg = base_np3o_runner_cfg()
     cfg["runner"]["experiment_name"] = "mini_jump"

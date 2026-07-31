@@ -33,9 +33,26 @@ from isaaclab.utils import configclass  # noqa: F401 — resolved at runtime via
 
 import ddt_lab.tasks.manager_based.locomotion.mdp as mdp
 from .flat_env_cfg import MiniFlatEnvCfg
-from .rough_env_cfg import MiniRoughEnvCfg
+from .rough_env_cfg import MiniRoughEnvCfg, ObservationsCfg, mini_height_scanner_cfg
 
-_90_DEG = 1.5708  # radians
+
+def _enable_height_scanner(env_cfg) -> None:
+    """Enable the critic-only height scanner after parent config overrides."""
+    env_cfg.scene.height_scanner = mini_height_scanner_cfg()
+    env_cfg.scene.height_scanner.update_period = env_cfg.decimation * env_cfg.sim.dt
+    env_cfg.observations.scanner = ObservationsCfg.ScannerCfg()
+
+
+def _disable_jump_rewards(env_cfg) -> None:
+    """Remove jump-only terms from recovery tasks and their training logs."""
+    for term_name in (
+        "jump_before_setting",
+        "lin_vel_z_jump",
+        "jump_flight_height",
+        "jump_land_stability",
+        "jump_land_orientation",
+    ):
+        setattr(env_cfg.rewards, term_name, None)
 
 
 @configclass
@@ -45,6 +62,11 @@ class MiniRecoveryEnvCfg(MiniFlatEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
+        # MiniFlatEnvCfg disables the scanner. Recovery enables it again so
+        # height_scan is available to NP3O's critic/scan encoder. It remains
+        # absent from the policy ObsGroup, so the actor observation stays 27-D.
+        _enable_height_scanner(self)
+
         # ------------------------------------------------------------------ #
         # Termination: NO reset on base contact                               #
         # Robot stays in fallen state and must learn to self-right.           #
@@ -52,16 +74,18 @@ class MiniRecoveryEnvCfg(MiniFlatEnvCfg):
         self.terminations.base_contact = None
 
         # ------------------------------------------------------------------ #
-        # Reset: ±90° roll / pitch — robot starts on its side ~half the time  #
+        # Reset curriculum: random root pose + random joint pose              #
         # ------------------------------------------------------------------ #
+        # reset_root_state_uniform 的 xyz 是相对默认位置的偏移。Mini 默认
+        # z=0.40 m，因此 level 0 的实际高度为 0.55--0.65 m，保证先自由落地。
         self.events.reset_base.params = {
             "pose_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
-                "z": (0.05, 0.5),
-                "roll":  (-3.14, 3.14),   # ±180°: covers fully inverted (was ±90°)
-                "pitch": (-_90_DEG, _90_DEG),
-                "yaw":   (-3.14, 3.14),
+                "x": (-0.10, 0.10),
+                "y": (-0.10, 0.10),
+                "z": (0.15, 0.25),
+                "roll": (-0.7854, 0.7854),
+                "pitch": (-0.5236, 0.5236),
+                "yaw": (-0.7854, 0.7854),
             },
             "velocity_range": {
                 "x": (-0.2, 0.2),
@@ -109,36 +133,35 @@ class MiniRecoveryEnvCfg(MiniFlatEnvCfg):
 
         # ── 屏蔽与恢复无关的速度指令信号 ──────────────────────────────────
 
-        self.rewards.track_lin_vel_xy_exp.weight = 0.0
-        self.rewards.track_ang_vel_z_exp.weight = 0.0
+        self.rewards.track_lin_vel_xy_exp.weight = 0.6
+        self.rewards.track_ang_vel_z_exp.weight = 0.3
 
         # ── CartPole 风格存活信号（无实际终止条件时无效，保持关闭）────────
 
         self.rewards.alive.weight = 0.0
         self.rewards.is_terminated.weight = 0.0
 
+        # Jump terms belong to MiniJumpFlatEnvCfg. Remove them entirely from
+        # Recovery so RewardManager neither computes nor logs them.
+        _disable_jump_rewards(self)
+
 
 @configclass
 class MiniRecoveryRoughEnvCfg(MiniRoughEnvCfg):
     """Mini 崎岖地形摔倒恢复环境。
 
-    与 Flat 版本的唯一区别：保留粗糙地形（摩擦/高度随机性），
-    但禁用高度扫描传感器，使观测维度与 Flat 版完全一致（critic=54），
-    可以直接加载 Flat Recovery 的 checkpoint 继续训练。
+    保留粗糙地形（摩擦/高度随机性）以及供 Critic 使用的高度扫描。
+    scanner 不进入 policy ObsGroup，因此不会改变 Actor 的部署输入。
     """
 
     def __post_init__(self):
         super().__post_init__()
 
         # ------------------------------------------------------------------ #
-        # 关闭 scanner：与 MiniFlatEnvCfg 对齐                               #
-        # 原因：                                                               #
-        #   1. 禁用后 critic 维度从 241 降回 54，与 Flat 版一致               #
-        #   2. 不再需要 scan_encoder，可直接加载 Flat checkpoint              #
-        #   3. 恢复训练阶段不需要高度感知，减少无效观测噪声                     #
+        # 开启 scanner：187-D height_scan 进入 Critic 的 scan encoder。       #
+        # Actor 仍只使用 policy ObsGroup，不接收 height_scan。                #
         # ------------------------------------------------------------------ #
-        self.scene.height_scanner = None          # 关闭传感器
-        self.observations.scanner = None          # 关闭 scanner 观测组
+        _enable_height_scanner(self)
 
         # ------------------------------------------------------------------ #
         # 地形难度课程：从最低级 (0) 开始，distance-based 升降级               #
@@ -163,7 +186,7 @@ class MiniRecoveryRoughEnvCfg(MiniRoughEnvCfg):
                 "y": (-0.5, 0.5),
                 "z": (0.05, 0.5),
                 "roll":  (-3.14, 3.14),   # ±180°: covers fully inverted
-                "pitch": (-_90_DEG, _90_DEG),
+                "pitch": (-3.14, 3.14),
                 "yaw":   (-3.14, 3.14),
             },
             "velocity_range": {
@@ -200,12 +223,15 @@ class MiniRecoveryRoughEnvCfg(MiniRoughEnvCfg):
         self.rewards.base_height_l2.weight = -7.0
 
         # 【速度指令】倒地时无法跟踪，关闭避免梯度冲突
-        self.rewards.track_lin_vel_xy_exp.weight = 0.0
-        self.rewards.track_ang_vel_z_exp.weight = 0.0
+        self.rewards.track_lin_vel_xy_exp.weight = 0.6
+        self.rewards.track_ang_vel_z_exp.weight = 0.3
 
         # CartPole 风格信号（无有效终止条件，保持关闭）
         self.rewards.alive.weight = 0.0
         self.rewards.is_terminated.weight = 0.0
+
+        # Recovery does not use the jump FSM or jump-specific rewards.
+        _disable_jump_rewards(self)
 
 
 @configclass
