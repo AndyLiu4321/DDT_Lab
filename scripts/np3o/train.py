@@ -7,6 +7,7 @@
 
 import argparse
 import importlib
+import os
 
 from isaaclab.app import AppLauncher
 
@@ -22,10 +23,17 @@ parser.add_argument("--experiment_name", type=str, default=None, help="Override 
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
+# This task has an RTX depth sensor even in headless mode.  Enable the camera
+# experience automatically so the existing training command does not need an
+# easy-to-miss extra flag.
+if "DDT-Stairs-Jump-Mini" in args_cli.task:
+    args_cli.enable_cameras = True
+    if args_cli.headless:
+        os.environ.pop("DISPLAY", None)
+
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
-import os
 from datetime import datetime
 
 import ddt_lab.tasks  # noqa: F401  -- registers tasks

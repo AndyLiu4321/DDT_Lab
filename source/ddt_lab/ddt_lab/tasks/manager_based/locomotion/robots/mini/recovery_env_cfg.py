@@ -49,6 +49,7 @@ def _disable_jump_rewards(env_cfg) -> None:
         "jump_before_setting",
         "lin_vel_z_jump",
         "jump_flight_height",
+        "jump_forward_progress",
         "jump_land_stability",
         "jump_land_orientation",
     ):

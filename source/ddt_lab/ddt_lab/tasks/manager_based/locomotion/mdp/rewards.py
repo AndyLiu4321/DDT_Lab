@@ -17,6 +17,8 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 
+from .terrain_features import forward_height_profile
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
@@ -740,11 +742,19 @@ def feet_slide(
 #     return torch.sum(diff, dim=1)
 
 
-def upward(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """Penalize z-axis base linear velocity using L2 squared kernel."""
+def upward(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str | None = None,
+) -> torch.Tensor:
+    """Reward upright orientation, optionally only outside active jump phases."""
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
     reward = torch.square(1 - asset.data.projected_gravity_b[:, 2])
+    term = _jump_term(env, command_name)
+    if term is not None:
+        standing = (term.jump_stage == term.STAGE_RECOVERY) | (term.jump_stage == term.STAGE_LAND)
+        reward *= standing.float()
     return reward
 
 
@@ -753,6 +763,7 @@ def base_height_l2(
     target_height: float,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     sensor_cfg: SceneEntityCfg | None = None,
+    command_name: str | None = None,
 ) -> torch.Tensor:
     """Penalize asset height from its target using L2 squared kernel.
 
@@ -776,6 +787,10 @@ def base_height_l2(
     # Compute the L2 squared penalty
     reward = torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    term = _jump_term(env, command_name)
+    if term is not None:
+        standing = (term.jump_stage == term.STAGE_RECOVERY) | (term.jump_stage == term.STAGE_LAND)
+        reward *= standing.float()
     return reward
 
 
@@ -924,6 +939,183 @@ def tracking_contacts_shaped_vel(
     return reward
 
 
+def terrain_roughness_gate(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+    low_height: float = 0.025,
+    high_height: float = 0.08,
+    forward_start_index: int = 2,
+) -> torch.Tensor:
+    """Continuous wheel-to-gait gate derived from upcoming terrain height.
+
+    The scanner is training-only reward information.  The Actor receives the
+    corresponding depth-camera profile and must infer the same transition.
+    The output is zero on flat ground and one once the upcoming absolute
+    height change reaches ``high_height``.
+    """
+    if high_height <= low_height:
+        raise ValueError(
+            f"high_height must exceed low_height, got low={low_height}, high={high_height}."
+        )
+    sensor: RayCaster = env.scene[sensor_cfg.name]
+    profile = forward_height_profile(sensor.data.ray_hits_w)
+    if not 0 <= forward_start_index < profile.shape[1]:
+        raise ValueError(
+            f"forward_start_index must be in [0, {profile.shape[1] - 1}], "
+            f"got {forward_start_index}."
+        )
+    height_change = torch.amax(torch.abs(profile[:, forward_start_index:]), dim=1)
+    gate = torch.clamp(
+        (height_change - low_height) / (high_height - low_height),
+        min=0.0,
+        max=1.0,
+    )
+    # Smoothstep avoids an abrupt reward discontinuity at the mode boundary.
+    return gate * gate * (3.0 - 2.0 * gate)
+
+
+def terrain_gated_flat_leg_posture(
+    env: "ManagerBasedRLEnv",
+    terrain_sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+    low_height: float = 0.025,
+    high_height: float = 0.08,
+    forward_start_index: int = 2,
+) -> torch.Tensor:
+    """Penalize leg motion only while upcoming terrain is flat.
+
+    With the four leg joints held near their default posture, velocity
+    tracking must be achieved by the two wheel velocity actions.
+    """
+    rough_gate = terrain_roughness_gate(
+        env,
+        terrain_sensor_cfg,
+        low_height=low_height,
+        high_height=high_height,
+        forward_start_index=forward_start_index,
+    )
+    return (1.0 - rough_gate) * default_joint_l2(env, asset_cfg)
+
+
+def terrain_gated_feet_air_time_positive_biped(
+    env: "ManagerBasedRLEnv",
+    command_name: str,
+    threshold: float,
+    sensor_cfg: SceneEntityCfg,
+    terrain_sensor_cfg: SceneEntityCfg,
+    low_height: float = 0.025,
+    high_height: float = 0.08,
+    forward_start_index: int = 2,
+) -> torch.Tensor:
+    """Reward one-wheel-at-a-time stepping only near uneven terrain."""
+    rough_gate = terrain_roughness_gate(
+        env,
+        terrain_sensor_cfg,
+        low_height=low_height,
+        high_height=high_height,
+        forward_start_index=forward_start_index,
+    )
+    return rough_gate * feet_air_time_positive_biped(
+        env,
+        command_name=command_name,
+        threshold=threshold,
+        sensor_cfg=sensor_cfg,
+    )
+
+
+def terrain_gated_alternating_foot_height(
+    env: "ManagerBasedRLEnv",
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    terrain_sensor_cfg: SceneEntityCfg,
+    cycle_time: float,
+    target_clearance: float = 0.08,
+    clearance_margin: float = 0.03,
+    max_clearance: float = 0.22,
+    std: float = 0.05,
+    duty_cycle: float = 0.5,
+    low_height: float = 0.025,
+    high_height: float = 0.08,
+    forward_start_index: int = 2,
+) -> torch.Tensor:
+    """Reward terrain-adaptive alternating wheel-foot clearance.
+
+    Clearance is measured relative to the lower wheel-foot.  This remains
+    meaningful when one wheel is already standing on a higher stair.  The
+    requested swing clearance grows with the upcoming height change instead
+    of forcing the same leg lift on every terrain level.
+    """
+    if max_clearance < target_clearance:
+        raise ValueError(
+            f"max_clearance must be >= target_clearance, got "
+            f"{max_clearance} < {target_clearance}."
+        )
+    asset: Articulation = env.scene[asset_cfg.name]
+    terrain_sensor: RayCaster = env.scene[terrain_sensor_cfg.name]
+    terrain_profile = forward_height_profile(terrain_sensor.data.ray_hits_w)
+    terrain_height = torch.amax(
+        torch.abs(terrain_profile[:, forward_start_index:]), dim=1
+    )
+    rough_gate = terrain_roughness_gate(
+        env,
+        terrain_sensor_cfg,
+        low_height=low_height,
+        high_height=high_height,
+        forward_start_index=forward_start_index,
+    )
+    desired_contact = _biped_desired_contact(env, cycle_time, duty_cycle)
+    swing_clearance = torch.clamp(
+        terrain_height + clearance_margin,
+        min=target_clearance,
+        max=max_clearance,
+    )
+    desired_clearance = (1.0 - desired_contact) * swing_clearance.unsqueeze(1)
+    foot_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]
+    actual_clearance = foot_z - torch.amin(foot_z, dim=1, keepdim=True)
+    error = torch.mean(torch.square(actual_clearance - desired_clearance), dim=1)
+    reward = torch.exp(-error / max(std**2, 1.0e-8))
+    moving = torch.norm(env.command_manager.get_command(command_name)[:, :3], dim=1) > 0.1
+    return rough_gate * reward * moving.float()
+
+
+def terrain_gated_swing_contact(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+    terrain_sensor_cfg: SceneEntityCfg,
+    cycle_time: float,
+    sigma: float = 25.0,
+    duty_cycle: float = 0.5,
+    low_height: float = 0.025,
+    high_height: float = 0.08,
+    forward_start_index: int = 2,
+) -> torch.Tensor:
+    """Penalize contact of the wheel-foot that should be swinging."""
+    rough_gate = terrain_roughness_gate(
+        env,
+        terrain_sensor_cfg,
+        low_height=low_height,
+        high_height=high_height,
+        forward_start_index=forward_start_index,
+    )
+    return rough_gate * tracking_contacts_shaped_force(
+        env,
+        sensor_cfg=sensor_cfg,
+        cycle_time=cycle_time,
+        sigma=sigma,
+        duty_cycle=duty_cycle,
+    )
+
+
+def both_feet_airborne(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Return one when both wheel-feet are airborne, discouraging jumping."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    in_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0
+    return torch.all(~in_contact, dim=1).float()
+
+
 def feet_too_close(
     env: "ManagerBasedRLEnv",
     asset_cfg: SceneEntityCfg,
@@ -1003,7 +1195,9 @@ def action_smooth(env: "ManagerBasedRLEnv") -> torch.Tensor:
 # ---------------------------------------------------------------------------
 
 def upright_progress(
-    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str | None = None,
 ) -> torch.Tensor:
     """Linear self-righting gradient: returns -g_z in [-1, +1].
 
@@ -1017,7 +1211,12 @@ def upright_progress(
         inverted (g_z ≈ +1) → -1   (penalty that pushes toward righting)
     """
     asset: RigidObject = env.scene[asset_cfg.name]
-    return -asset.data.projected_gravity_b[:, 2]
+    reward = -asset.data.projected_gravity_b[:, 2]
+    term = _jump_term(env, command_name)
+    if term is not None:
+        standing = (term.jump_stage == term.STAGE_RECOVERY) | (term.jump_stage == term.STAGE_LAND)
+        reward *= standing.float()
+    return reward
 
 
 def inverted_ang_vel_bonus(
@@ -1109,12 +1308,34 @@ def _jump_term(env: ManagerBasedRLEnv, command_name: str | None):
     return env.command_manager.get_term(command_name)
 
 
+def _height_above_terrain(
+    env: ManagerBasedRLEnv,
+    asset: RigidObject,
+    terrain_sensor_cfg: SceneEntityCfg | None,
+) -> torch.Tensor:
+    """Return root height relative to terrain, or world height without a scanner."""
+    if terrain_sensor_cfg is None:
+        return asset.data.root_pos_w[:, 2]
+
+    sensor: RayCaster = env.scene[terrain_sensor_cfg.name]
+    ray_heights = sensor.data.ray_hits_w[..., 2]
+    finite = torch.isfinite(ray_heights)
+    safe_heights = torch.where(finite, ray_heights, torch.zeros_like(ray_heights))
+    valid_count = torch.clamp(torch.sum(finite, dim=1), min=1)
+    terrain_height = torch.sum(safe_heights, dim=1) / valid_count
+    relative_height = asset.data.root_pos_w[:, 2] - terrain_height
+    # Preserve the flat-task behavior if a ray caster temporarily has no hit.
+    has_valid_hit = torch.any(finite, dim=1)
+    return torch.where(has_valid_hit, relative_height, asset.data.root_pos_w[:, 2])
+
+
 def jump_before_setting(
     env: ManagerBasedRLEnv,
     crouch_height: float = 0.25,
     sigma: float = 0.04,
     command_name: str | None = None,
     sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    terrain_sensor_cfg: SceneEntityCfg | None = None,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """Stage 0 — reward crouching/蓄力 pose when on ground.
@@ -1128,7 +1349,7 @@ def jump_before_setting(
     on_ground = torch.any(
         contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0, dim=1
     )
-    height = asset.data.root_pos_w[:, 2]
+    height = _height_above_terrain(env, asset, terrain_sensor_cfg)
     reward = torch.exp(-((height - crouch_height) ** 2) / (2.0 * sigma ** 2))
     term = _jump_term(env, command_name)
     if term is not None:
@@ -1142,6 +1363,7 @@ def lin_vel_z_jump(
     max_vel: float = 10.0,
     require_in_air: bool = True,
     command_name: str | None = None,
+    forward_velocity_target: float | None = None,
     sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
@@ -1155,6 +1377,16 @@ def lin_vel_z_jump(
     asset: RigidObject = env.scene[asset_cfg.name]
     vel_z = asset.data.root_lin_vel_w[:, 2]
     reward = torch.clamp(vel_z, 0.0, max_vel)
+    if forward_velocity_target is not None:
+        # Stairs are aligned with world +X.  Coupling vertical velocity to
+        # forward velocity prevents an in-place hop from collecting take-off
+        # reward.  Flat jump tasks keep the original behavior with None.
+        forward_gate = torch.clamp(
+            asset.data.root_lin_vel_w[:, 0] / max(forward_velocity_target, 1.0e-6),
+            0.0,
+            1.0,
+        )
+        reward *= forward_gate
     term = _jump_term(env, command_name)
     if term is not None:
         active_jump = (term.jump_stage == term.STAGE_TAKEOFF) | (term.jump_stage == term.STAGE_FLIGHT)
@@ -1174,7 +1406,9 @@ def jump_flight_height(
     command_name: str | None = None,
     target_height: float | None = None,
     min_height: float = 0.42,
+    forward_target_distance: float | None = None,
     sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    terrain_sensor_cfg: SceneEntityCfg | None = None,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """Stage 2 — reward COM height above base_height during flight.
@@ -1182,25 +1416,58 @@ def jump_flight_height(
     Returns max(h - base_height, 0) when all feet are off the ground.
     """
     asset: RigidObject = env.scene[asset_cfg.name]
+    height = _height_above_terrain(env, asset, terrain_sensor_cfg)
     term = _jump_term(env, command_name)
     if term is not None:
         target = target_height if target_height is not None else term.cfg.target_height
         window_steps = int(term.cfg.flight_reward_window_s / env.step_dt)
         in_reward_window = (term.jump_stage == term.STAGE_FLIGHT) & (term.flight_reward_timer <= window_steps)
-        above_takeoff = asset.data.root_pos_w[:, 2] > min_height
+        above_takeoff = height > min_height
         height_progress = torch.clamp(
-            (asset.data.root_pos_w[:, 2] - base_height) / max(target - base_height, 1.0e-6),
+            (height - base_height) / max(target - base_height, 1.0e-6),
             0.0,
             1.0,
         )
-        target_bonus = torch.exp(-torch.abs(asset.data.root_pos_w[:, 2] - target) * 5.0)
-        return in_reward_window.float() * above_takeoff.float() * (12.0 * height_progress + 4.0 * target_bonus)
+        target_bonus = torch.exp(-torch.abs(height - target) * 5.0)
+        reward = 12.0 * height_progress + 4.0 * target_bonus
+        if forward_target_distance is not None and hasattr(term, "takeoff_pos_w"):
+            forward_distance = asset.data.root_pos_w[:, 0] - term.takeoff_pos_w[:, 0]
+            forward_gate = torch.clamp(
+                forward_distance / max(forward_target_distance, 1.0e-6),
+                0.0,
+                1.0,
+            )
+            reward *= forward_gate
+        return in_reward_window.float() * above_takeoff.float() * reward
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     in_air = torch.all(
         contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] == 0.0, dim=1
     )
-    height = asset.data.root_pos_w[:, 2]
     return in_air.float() * torch.clamp(height - base_height, 0.0, None)
+
+
+def jump_forward_progress(
+    env: ManagerBasedRLEnv,
+    target_distance: float = 0.45,
+    command_name: str | None = None,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward forward displacement during a commanded jump.
+
+    The Mini stairs terrain is aligned with world ``+X`` and one tread is
+    0.40 m wide.  Normalizing at 0.45 m therefore asks the robot to clear one
+    complete tread instead of collecting the vertical jump rewards in place.
+    The term is active only in FLIGHT/LAND and is bounded to ``[0, 1]``.
+    """
+    term = _jump_term(env, command_name)
+    if term is None or not hasattr(term, "takeoff_pos_w"):
+        return torch.zeros(env.num_envs, device=env.device)
+
+    asset: RigidObject = env.scene[asset_cfg.name]
+    forward_distance = asset.data.root_pos_w[:, 0] - term.takeoff_pos_w[:, 0]
+    progress = torch.clamp(forward_distance / max(target_distance, 1.0e-6), 0.0, 1.0)
+    active = (term.jump_stage == term.STAGE_FLIGHT) | (term.jump_stage == term.STAGE_LAND)
+    return progress * active.float()
 
 
 def jump_land_stability(

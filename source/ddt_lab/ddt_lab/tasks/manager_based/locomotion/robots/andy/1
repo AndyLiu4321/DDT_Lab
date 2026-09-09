@@ -1,0 +1,162 @@
+from legged_gym.envs.base.legged_robot_config import (
+    LeggedRobotCfg,
+    LeggedRobotCfgPPO,
+)
+
+
+class AndyMiniRoughCfg(LeggedRobotCfg):
+    """Rough-terrain training configuration for AndyMini."""
+
+    class env(LeggedRobotCfg.env):
+        num_envs = 4096
+        # Six policy actions control four leg joints and two drive wheels. The
+        # two auxiliary wheels remain passive physical DOFs.
+        num_actions = 6
+        # ang_vel(3), gravity(3), commands(3), and four values per action.
+        num_observations = 33
+        num_obs_hist = 5
+        # obs(33), base velocity(3), 9 body contact forces(27), heights(187)
+        num_privileged_obs = 250
+
+    class commands(LeggedRobotCfg.commands):
+        curriculum = True
+        max_curriculum = 1.0
+        num_commands = 4
+        resampling_time = 10.0
+        heading_command = False
+
+        class ranges:
+            lin_vel_x = [-0.6, 0.6]
+            lin_vel_y = [0.0, 0.0]
+            ang_vel_yaw = [-0.6, 0.6]
+            heading = [-3.14, 3.14]
+
+    class terrain(LeggedRobotCfg.terrain):
+        mesh_type = "trimesh"
+        curriculum = True
+        horizontal_scale = 0.1
+        vertical_scale = 0.005
+        border_size = 25
+        static_friction = 1.0
+        dynamic_friction = 1.0
+        restitution = 0.0
+        measure_heights = True
+        measured_points_x = [
+            -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0,
+            0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
+        ]
+        measured_points_y = [
+            -0.5, -0.4, -0.3, -0.2, -0.1, 0.0,
+            0.1, 0.2, 0.3, 0.4, 0.5,
+        ]
+        selected = False
+        terrain_kwargs = None
+        terrain_length = 8.0
+        terrain_width = 8.0
+        num_rows = 10
+        num_cols = 20
+        terrain_proportions = [0.35, 0.15, 0.20, 0.20, 0.10]
+        max_init_terrain_level = 2
+        difficulty_scale = 0.5
+        slope_treshold = 0.75
+
+    class init_state(LeggedRobotCfg.init_state):
+        pos = [0.0, 0.0, 0.34]
+        default_joint_angles = {
+            "joint_left_leg_1": 0.0,
+            "joint_left_leg_2": 0.0,
+            "joint_left_leg_3": 0.0,
+            "joint_left_wheel_1": 0.0,
+            "joint_right_leg_1": 0.0,
+            "joint_right_leg_2": 0.0,
+            "joint_right_leg_3": 0.0,
+            "joint_right_wheel_1": 0.0,
+        }
+        init_joint_angles = default_joint_angles.copy()
+
+    class control(LeggedRobotCfg.control):
+        control_type = "P"
+        stiffness = {
+            "leg_1": 40.0,
+            "leg_2": 40.0,
+            # leg_3 is the driven wheel and uses velocity control.
+            "leg_3": 0.0,
+        }
+        damping = {
+            "leg_1": 1.0,
+            "leg_2": 1.0,
+            "leg_3": 0.5,
+        }
+        action_scale = 0.35
+        vel_scale = 12.0
+        decimation = 4
+
+    class asset(LeggedRobotCfg.asset):
+        file = (
+            "{LEGGED_GYM_ROOT_DIR}/resources/robots/"
+            "andymini/urdf/andymini.urdf"
+        )
+        name = "andymini"
+        # leg_3 links are driven wheels; wheel_1 links are passive auxiliaries.
+        foot_name = "leg_3"
+        wheel_name = ["leg_3"]
+        penalize_contacts_on = ["leg_1", "leg_2", "base_link"]
+        terminate_after_contacts_on = ["base_link"]
+        self_collisions = 0
+        collapse_fixed_joints = True
+        replace_cylinder_with_capsule = False
+        flip_visual_attachments = False
+
+    class domain_rand(LeggedRobotCfg.domain_rand):
+        randomize_friction = True
+        friction_range = [0.6, 1.2]
+        randomize_base_mass = True
+        added_mass_range = [-0.25, 0.25]
+        push_robots = False
+        randomize_action_latency = False
+        latency_range = [0.0, 0.0]
+
+    class rewards(LeggedRobotCfg.rewards):
+        only_positive_rewards = True
+        tracking_sigma = 0.25
+        soft_dof_pos_limit = 0.95
+        soft_dof_vel_limit = 1.0
+        soft_torque_limit = 1.0
+        base_height_target = 0.32
+        max_contact_force = 80.0
+
+        class scales(LeggedRobotCfg.rewards.scales):
+            termination = -1.0
+            tracking_lin_vel = 3.0
+            tracking_ang_vel = 1.0
+            lin_vel_z = -1.0
+            ang_vel_xy = -0.1
+            orientation = -1.0
+            torques = -0.00001
+            dof_vel = -1e-7
+            dof_acc = -1e-7
+            base_height = -8.0
+            feet_air_time = 0.2
+            collision = -1.0
+            feet_stumble = -0.2
+            action_rate = -0.02
+            stand_still = -0.5
+            dof_pos_limits = -0.2
+            joint_power = 0.0
+            power_distribution = 0.0
+
+
+class AndyMiniRoughCfgPPO(LeggedRobotCfgPPO):
+    class algorithm(LeggedRobotCfgPPO.algorithm):
+        entropy_coef = 0.01
+        learning_rate = 1e-3
+
+    class runner(LeggedRobotCfgPPO.runner):
+        run_name = ""
+        experiment_name = "rough_andymini"
+        num_steps_per_env = 24
+        max_iterations = 30000
+        load_run = -1
+        checkpoint = -1
+        resume = False
+        resume_path = -1

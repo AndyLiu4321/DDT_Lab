@@ -15,6 +15,7 @@ class D1FlatEnvCfg(D1RoughEnvCfg):
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
         self.scene.height_scanner = None
+        self.observations.critic.height_scan = None
         self.observations.scanner = None
         self.curriculum.terrain_levels = None
 

@@ -36,6 +36,15 @@ def mini_stairs_np3o_runner_cfg() -> dict:
     return cfg
 
 
+def mini_stairs_jump_np3o_runner_cfg() -> dict:
+    cfg = base_np3o_runner_cfg()
+    # Compatibility function name for the registered Stairs-Jump task.  The
+    # task is now a 38-D terrain-aware wheel/leg hybrid without jump control.
+    cfg["runner"]["experiment_name"] = "mini_stairs_wheel_leg_hybrid"
+    cfg["runner"]["max_iterations"] = 20000
+    return cfg
+
+
 def mini_jump_np3o_runner_cfg() -> dict:
     cfg = base_np3o_runner_cfg()
     cfg["runner"]["experiment_name"] = "mini_jump"

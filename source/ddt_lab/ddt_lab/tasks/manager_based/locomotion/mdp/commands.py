@@ -24,6 +24,8 @@ from .utils import is_robot_on_terrain
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
+from .terrain_features import grid_height_profile
+
 
 class JumpCommand(CommandTerm):
     """Jump trigger command with the same FSM shape as ``wheelfoot_flat_jump``.
@@ -68,11 +70,15 @@ class JumpCommand(CommandTerm):
         self.s3_timer = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
         self.flight_reward_timer = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
         self.trigger_step = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        # World-frame take-off position.  Stairs tasks use it to reward
+        # clearing a complete tread instead of learning an in-place hop.
+        self.takeoff_pos_w = torch.zeros(self.num_envs, 3, device=self.device)
 
         self.metrics["jump_cmd"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["jump_stage"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["has_jumped"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["max_height"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["forward_distance"] = torch.zeros(self.num_envs, device=self.device)
 
     @property
     def command(self) -> torch.Tensor:
@@ -93,6 +99,9 @@ class JumpCommand(CommandTerm):
         self.metrics["jump_stage"] = self.jump_stage.float()
         self.metrics["has_jumped"] = self.has_jumped.float()
         self.metrics["max_height"] = self.max_height
+        self.metrics["forward_distance"] = torch.clamp(
+            self.asset.data.root_pos_w[:, 0] - self.takeoff_pos_w[:, 0], min=0.0
+        )
 
     def _resample_command(self, env_ids: Sequence[int]):
         if isinstance(env_ids, slice):
@@ -109,7 +118,9 @@ class JumpCommand(CommandTerm):
 
         if self.cfg.manual_mode:
             manual_mask = self.jump_cmd[:, 0] > 0.0
-            self.jump_stage[manual_mask & (self.jump_stage == self.STAGE_RECOVERY)] = self.STAGE_TAKEOFF
+            manual_takeoff = manual_mask & (self.jump_stage == self.STAGE_RECOVERY)
+            self.takeoff_pos_w[manual_takeoff] = self.asset.data.root_pos_w[manual_takeoff]
+            self.jump_stage[manual_takeoff] = self.STAGE_TAKEOFF
             self.jump_stage[~manual_mask] = self.STAGE_RECOVERY
             self._update_jump_timers()
             return
@@ -127,6 +138,7 @@ class JumpCommand(CommandTerm):
             & (self._env.episode_length_buf >= self.trigger_step)
             & (self.jump_stage == self.STAGE_PREP)
         )
+        self.takeoff_pos_w[trigger_mask] = self.asset.data.root_pos_w[trigger_mask]
         self.jump_stage[trigger_mask] = self.STAGE_TAKEOFF
 
         self._update_jump_timers()
@@ -170,6 +182,13 @@ class JumpCommand(CommandTerm):
         self.last_contacts = contacts.clone()
 
         airborne = torch.all(~self.contact_filt, dim=1)
+        # Optional take-off validation prevents brief wheel unloading or
+        # contact-sensor flicker from being counted as a real jump.  Defaults
+        # preserve the original contact-only behavior for existing tasks.
+        if self.cfg.takeoff_min_height is not None:
+            airborne &= self.asset.data.root_pos_w[:, 2] >= self.cfg.takeoff_min_height
+        if self.cfg.takeoff_min_vel_z is not None:
+            airborne &= self.asset.data.root_lin_vel_w[:, 2] >= self.cfg.takeoff_min_vel_z
         takeoff_ids = airborne & (self.jump_stage == self.STAGE_TAKEOFF)
         self.was_in_flight[takeoff_ids] = True
         self.jump_stage[takeoff_ids] = self.STAGE_FLIGHT
@@ -187,6 +206,7 @@ class JumpCommand(CommandTerm):
         self.was_in_flight[env_ids] = False
         self.has_jumped[env_ids] = False
         self.max_height[env_ids] = 0.0
+        self.takeoff_pos_w[env_ids] = self.asset.data.root_pos_w[env_ids]
         self.last_contacts[env_ids] = False
         self.contact_filt[env_ids] = False
         self.recovery_timer[env_ids] = 0
@@ -225,9 +245,148 @@ class JumpCommandCfg(CommandTermCfg):
     target_height: float = 0.8
     jump_probability: float = 0.2
     contact_force_threshold: float = 1.0
+    takeoff_min_height: float | None = None
+    takeoff_min_vel_z: float | None = None
     play_mode: bool = False
     play_trigger_steps: int = 250
     manual_mode: bool = False
+
+
+class TerrainJumpCommand(JumpCommand):
+    """Privileged reward FSM triggered by terrain geometry instead of a command.
+
+    This term remains inside the training environment solely to gate PREP,
+    TAKEOFF, FLIGHT and LAND rewards.  The Actor does not observe its command
+    value or stage; it must infer when to jump from ``terrain_height_profile``.
+    """
+
+    cfg: "TerrainJumpCommandCfg"
+
+    def __init__(self, cfg: "TerrainJumpCommandCfg", env):
+        super().__init__(cfg, env)
+        self.terrain_sensor = env.scene[cfg.terrain_sensor_cfg.name]
+        self.obstacle_distance = torch.full(
+            (self.num_envs,), cfg.max_detection_distance, device=self.device
+        )
+        self.obstacle_height = torch.zeros(self.num_envs, device=self.device)
+        self.obstacle_detected = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.prep_timer = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+        # Do not expose the inherited command-intent metric: this FSM has no
+        # operator command and the value is only an internal reward activation.
+        self.metrics.pop("jump_cmd", None)
+        self.metrics["obstacle_distance"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["obstacle_height"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["obstacle_detected"] = torch.zeros(self.num_envs, device=self.device)
+
+    def _update_metrics(self):
+        self.metrics["jump_stage"] = self.jump_stage.float()
+        self.metrics["has_jumped"] = self.has_jumped.float()
+        self.metrics["max_height"] = self.max_height
+        self.metrics["forward_distance"] = torch.clamp(
+            self.asset.data.root_pos_w[:, 0] - self.takeoff_pos_w[:, 0], min=0.0
+        )
+        self.metrics["obstacle_distance"] = self.obstacle_distance
+        self.metrics["obstacle_height"] = self.obstacle_height
+        self.metrics["obstacle_detected"] = self.obstacle_detected.float()
+
+    def _resample_command(self, env_ids: Sequence[int]):
+        if isinstance(env_ids, slice):
+            env_ids = torch.arange(self.num_envs, device=self.device)
+        elif not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+        if len(env_ids) > 0:
+            self._reset_jump_state(env_ids, absolute=True)
+
+    def _update_command(self):
+        self._update_contact_state()
+        self._update_obstacle_geometry()
+        self.max_height = torch.maximum(self.max_height, self.asset.data.root_pos_w[:, 2])
+
+        recovery = self.jump_stage == self.STAGE_RECOVERY
+        begin_prep = recovery & self.obstacle_detected
+        self.jump_cmd[begin_prep, 0] = 1.0
+        self.jump_stage[begin_prep] = self.STAGE_PREP
+
+        prep = self.jump_stage == self.STAGE_PREP
+        self.prep_timer[prep] += 1
+        self.prep_timer[~prep] = 0
+        prep_timeout_steps = int(self.cfg.prep_timeout_s / self._env.step_dt)
+        takeoff = prep & (
+            (self.obstacle_distance <= self.cfg.takeoff_distance)
+            | (self.prep_timer >= prep_timeout_steps)
+        )
+        self.takeoff_pos_w[takeoff] = self.asset.data.root_pos_w[takeoff]
+        self.jump_stage[takeoff] = self.STAGE_TAKEOFF
+
+        # If the robot turns away before reaching the obstacle, cancel the
+        # hidden reward phase instead of rewarding an unrelated jump.
+        lost_obstacle = prep & ~self.obstacle_detected
+        if torch.any(lost_obstacle):
+            lost_ids = lost_obstacle.nonzero(as_tuple=False).flatten()
+            self._reset_jump_state(lost_ids, absolute=False)
+
+        self._update_jump_timers()
+
+    def _update_obstacle_geometry(self):
+        profile = grid_height_profile(
+            self.terrain_sensor.data.ray_hits_w,
+            num_longitudinal=self.cfg.num_longitudinal,
+            num_lateral=self.cfg.num_lateral,
+            reference_start_column=self.cfg.reference_start_column,
+            reference_end_column=self.cfg.reference_end_column,
+        )
+        forward = profile[:, self.cfg.forward_start_column :]
+        distances = (
+            torch.arange(forward.shape[1], device=self.device, dtype=forward.dtype)
+            * self.cfg.grid_resolution
+        )
+        candidates = (
+            (forward >= self.cfg.min_obstacle_height)
+            & (forward <= self.cfg.max_obstacle_height)
+            & (distances.unsqueeze(0) >= self.cfg.min_detection_distance)
+            & (distances.unsqueeze(0) <= self.cfg.max_detection_distance)
+        )
+        detected = torch.any(candidates, dim=1)
+        first_index = torch.argmax(candidates.to(torch.int64), dim=1)
+        batch = torch.arange(self.num_envs, device=self.device)
+        self.obstacle_detected = detected
+        self.obstacle_distance = torch.where(
+            detected,
+            distances[first_index],
+            torch.full_like(self.obstacle_distance, self.cfg.max_detection_distance),
+        )
+        self.obstacle_height = torch.where(
+            detected,
+            forward[batch, first_index],
+            torch.zeros_like(self.obstacle_height),
+        )
+
+    def _reset_jump_state(self, env_ids: torch.Tensor, absolute: bool):
+        super()._reset_jump_state(env_ids, absolute)
+        self.jump_cmd[env_ids, 0] = 0.0
+        if hasattr(self, "prep_timer"):
+            self.prep_timer[env_ids] = 0
+
+
+@configclass
+class TerrainJumpCommandCfg(JumpCommandCfg):
+    """Configuration for scanner-triggered privileged jump reward stages."""
+
+    class_type: type = TerrainJumpCommand
+    terrain_sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_scanner")
+    num_longitudinal: int = 17
+    num_lateral: int = 11
+    reference_start_column: int = 6
+    reference_end_column: int = 9
+    forward_start_column: int = 8
+    grid_resolution: float = 0.1
+    min_obstacle_height: float = 0.025
+    max_obstacle_height: float = 0.35
+    min_detection_distance: float = 0.2
+    max_detection_distance: float = 0.7
+    takeoff_distance: float = 0.35
+    prep_timeout_s: float = 2.0
+    jump_probability: float = 0.0
 
 
 class WheelLeggedCommand(CommandTerm):

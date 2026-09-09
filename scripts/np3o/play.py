@@ -7,6 +7,7 @@
 
 import argparse
 import atexit
+import csv
 import importlib
 import os
 import select
@@ -14,6 +15,7 @@ import sys
 import termios
 import time
 import tty
+from datetime import datetime
 
 from isaaclab.app import AppLauncher
 
@@ -58,15 +60,54 @@ parser.add_argument(
 parser.add_argument('--keyboard_lin_vel', type=float, default=0.6, help='Keyboard linear velocity command magnitude.')
 parser.add_argument('--keyboard_ang_vel', type=float, default=0.8, help='Keyboard yaw velocity command magnitude.')
 parser.add_argument('--keyboard_hold_s', type=float, default=0.25, help='Terminal key hold time between key repeats.')
+parser.add_argument(
+    '--record_depth',
+    action='store_true',
+    help='Record the depth_camera output as preview and 16-bit raw PNG sequences.',
+)
+parser.add_argument(
+    '--depth_record_dir',
+    type=str,
+    default=None,
+    help='Depth output directory (defaults beside the checkpoint).',
+)
+parser.add_argument('--depth_record_env', type=int, default=0, help='Environment index whose depth is recorded.')
+parser.add_argument(
+    '--depth_record_scale',
+    type=int,
+    default=10,
+    help='Nearest-neighbor scale factor for preview PNGs.',
+)
+parser.add_argument('--depth_preview_near', type=float, default=0.10, help='White point of depth preview in metres.')
+parser.add_argument('--depth_preview_far', type=float, default=1.50, help='Black point of depth preview in metres.')
+parser.add_argument(
+    '--depth_record_max_frames',
+    type=int,
+    default=0,
+    help='Stop recording after this many camera frames; 0 means unlimited.',
+)
+parser.add_argument(
+    '--depth_record_exit_on_complete',
+    action='store_true',
+    help='Exit playback when --depth_record_max_frames is reached.',
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, _ = parser.parse_known_args()
+
+# The stairs-jump Actor consumes a base-mounted RTX depth camera.
+if "DDT-Stairs-Jump-Mini" in args_cli.task or args_cli.record_depth:
+    args_cli.enable_cameras = True
+    if args_cli.headless:
+        os.environ.pop("DISPLAY", None)
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 import ddt_lab.tasks  # noqa: F401  -- registers tasks
 import gymnasium as gym
+import numpy as np
 import torch
+from PIL import Image
 from ddt_lab.algorithms.np3o import IsaacLabNP3OWrapper, OnConstraintPolicyRunner
 from isaaclab_tasks.utils import get_checkpoint_path
 
@@ -78,6 +119,9 @@ _KNOWN_MINI_TASK_OBS_DIMS = {
     "DDT-Recovery-Flat-Mini-Play-v0": (27, 231),
     "DDT-jump-Flat-Mini-v0": (28, 49),
     "DDT-jump-Flat-Mini-Play-v0": (28, 49),
+    "DDT-Stairs-Jump-Mini-v0": (38, 32),
+    "DDT-Stairs-Jump-Mini-Play-v0": (38, 32),
+    "DDT-Stairs-Jump-Mini-Legacy-Play-v0": (36, 235),
 }
 
 
@@ -114,6 +158,7 @@ def _auto_select_task_for_checkpoint(task: str, checkpoint_dims: tuple[int, int]
         "DDT-Velocity-Flat-Mini-Play-v0" if prefer_play else "DDT-Velocity-Flat-Mini-v0",
         "DDT-Recovery-Flat-Mini-Play-v0" if prefer_play else "DDT-Recovery-Flat-Mini-v0",
         "DDT-jump-Flat-Mini-Play-v0" if prefer_play else "DDT-jump-Flat-Mini-v0",
+        "DDT-Stairs-Jump-Mini-Play-v0" if prefer_play else "DDT-Stairs-Jump-Mini-v0",
     ]
     matches = [candidate for candidate in candidate_tasks if _KNOWN_MINI_TASK_OBS_DIMS[candidate] == checkpoint_dims]
     if len(matches) == 1:
@@ -167,6 +212,129 @@ def _validate_checkpoint_dims(
         print(f"[WARN] {msg}")
         return
     raise RuntimeError(msg)
+
+
+class DepthFrameRecorder:
+    """Write unique depth-camera frames as preview and raw PNG sequences."""
+
+    def __init__(
+        self,
+        env: IsaacLabNP3OWrapper,
+        output_dir: str,
+        env_index: int,
+        preview_scale: int,
+        preview_near: float,
+        preview_far: float,
+        max_frames: int,
+    ):
+        self.unwrapped = env.unwrapped
+        if not 0 <= env_index < self.unwrapped.num_envs:
+            raise ValueError(
+                f"--depth_record_env must be in [0, {self.unwrapped.num_envs - 1}], got {env_index}."
+            )
+        if preview_scale < 1:
+            raise ValueError(f"--depth_record_scale must be >= 1, got {preview_scale}.")
+        if preview_far <= preview_near:
+            raise ValueError(
+                "--depth_preview_far must be greater than --depth_preview_near, "
+                f"got near={preview_near}, far={preview_far}."
+            )
+
+        try:
+            self.camera = self.unwrapped.scene["depth_camera"]
+        except KeyError as exc:
+            raise RuntimeError(
+                "--record_depth requires a scene sensor named 'depth_camera'."
+            ) from exc
+
+        self.output_dir = os.path.abspath(output_dir)
+        self.preview_dir = os.path.join(self.output_dir, "preview")
+        self.raw_dir = os.path.join(self.output_dir, "raw_mm")
+        os.makedirs(self.preview_dir, exist_ok=True)
+        os.makedirs(self.raw_dir, exist_ok=True)
+        self.env_index = env_index
+        self.preview_scale = preview_scale
+        self.preview_near = preview_near
+        self.preview_far = preview_far
+        self.max_frames = max_frames
+        self.frame_count = 0
+        self.last_sensor_time = -1.0
+        self.finished = False
+        self._manifest_file = open(
+            os.path.join(self.output_dir, "frames.csv"),
+            "w",
+            newline="",
+            encoding="utf-8",
+        )
+        self._manifest = csv.writer(self._manifest_file)
+        self._manifest.writerow(("frame", "sensor_time_s", "simulation_step", "raw_unit"))
+        print(
+            "[INFO] Recording depth frames to "
+            f"{self.output_dir} (env={self.env_index}, camera update={self.camera.cfg.update_period:g}s)."
+        )
+
+    def capture(self, simulation_step: int):
+        if self.finished:
+            return
+
+        # The policy runs at 50 Hz while this camera runs at 20 Hz.  The
+        # sensor timestamp prevents writing duplicate frames.
+        sensor_time = float(self.camera._timestamp_last_update[self.env_index].item())
+        if sensor_time < self.last_sensor_time:
+            # Sensor timestamps restart when an environment is reset.
+            self.last_sensor_time = -1.0
+        if sensor_time <= self.last_sensor_time + 1.0e-8:
+            return
+        self.last_sensor_time = sensor_time
+
+        depth = self.camera.data.output["depth"][self.env_index, ..., 0]
+        depth_cpu = depth.detach().float().cpu().numpy()
+        valid = np.isfinite(depth_cpu) & (depth_cpu > 0.0)
+
+        # 16-bit PNG stores millimetres losslessly.  Zero denotes invalid or
+        # out-of-range depth.
+        raw_mm = np.zeros(depth_cpu.shape, dtype=np.uint16)
+        raw_mm[valid] = np.clip(
+            np.rint(depth_cpu[valid] * 1000.0),
+            1,
+            np.iinfo(np.uint16).max,
+        ).astype(np.uint16)
+
+        # Consistent visualization: near is white, far is black.
+        preview = np.zeros(depth_cpu.shape, dtype=np.uint8)
+        normalized = (self.preview_far - depth_cpu[valid]) / (
+            self.preview_far - self.preview_near
+        )
+        preview[valid] = np.clip(np.rint(normalized * 255.0), 0, 255).astype(np.uint8)
+
+        filename = f"frame_{self.frame_count:06d}.png"
+        Image.fromarray(raw_mm).save(os.path.join(self.raw_dir, filename))
+        preview_image = Image.fromarray(preview)
+        if self.preview_scale != 1:
+            preview_image = preview_image.resize(
+                (
+                    preview_image.width * self.preview_scale,
+                    preview_image.height * self.preview_scale,
+                ),
+                Image.Resampling.NEAREST,
+            )
+        preview_image.save(os.path.join(self.preview_dir, filename))
+        self._manifest.writerow((self.frame_count, f"{sensor_time:.6f}", simulation_step, "millimetre"))
+        self.frame_count += 1
+
+        if self.max_frames > 0 and self.frame_count >= self.max_frames:
+            self.finished = True
+            print(f"\n[INFO] Depth recording reached {self.frame_count} frames.")
+
+    def close(self):
+        if self._manifest_file.closed:
+            return
+        self._manifest_file.flush()
+        self._manifest_file.close()
+        print(
+            f"\n[INFO] Saved {self.frame_count} depth frames to {self.output_dir}. "
+            "preview/ is display-ready; raw_mm/ contains 16-bit millimetre depth."
+        )
 
 
 class KeyboardCommandController:
@@ -624,6 +792,21 @@ def main():
 
     policy = runner.get_inference_policy(args_cli.device or "cuda:0")
     obs = env.get_observations()
+    depth_recorder = None
+    if args_cli.record_depth:
+        depth_record_dir = args_cli.depth_record_dir
+        if depth_record_dir is None:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            depth_record_dir = os.path.join(os.path.dirname(ckpt), f"depth_record_{timestamp}")
+        depth_recorder = DepthFrameRecorder(
+            env,
+            output_dir=depth_record_dir,
+            env_index=args_cli.depth_record_env,
+            preview_scale=args_cli.depth_record_scale,
+            preview_near=args_cli.depth_preview_near,
+            preview_far=args_cli.depth_preview_far,
+            max_frames=args_cli.depth_record_max_frames,
+        )
     keyboard_controller = KeyboardCommandController(
         env,
         lin_vel=args_cli.keyboard_lin_vel,
@@ -632,18 +815,26 @@ def main():
         hold_s=args_cli.keyboard_hold_s,
     ) if args_cli.keyboard else None
     try:
+        simulation_step = 0
         while simulation_app.is_running():
             with torch.inference_mode():
                 if keyboard_controller is not None:
                     obs = keyboard_controller.apply(obs)
                 actions = policy(obs)
                 obs, _, _, _, dones, _ = env.step(actions)
+                simulation_step += 1
+                if depth_recorder is not None:
+                    depth_recorder.capture(simulation_step)
+                    if depth_recorder.finished and args_cli.depth_record_exit_on_complete:
+                        break
                 if keyboard_controller is not None:
                     obs = keyboard_controller.apply(obs, advance_history=True, reset_mask=dones)
     finally:
         if keyboard_controller is not None:
             keyboard_controller.close()
-    env.env.close()
+        if depth_recorder is not None:
+            depth_recorder.close()
+        env.env.close()
 
 
 if __name__ == "__main__":

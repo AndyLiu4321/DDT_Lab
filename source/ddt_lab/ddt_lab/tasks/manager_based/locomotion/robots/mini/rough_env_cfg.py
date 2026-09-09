@@ -543,6 +543,11 @@ class RewardsCfg:
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"]),
         },
     )
+    jump_forward_progress = RewTerm(
+        func=mdp.jump_forward_progress,
+        weight=0.0,
+        params={"target_distance": 0.45},
+    )
     jump_land_stability = RewTerm(
         func=mdp.jump_land_stability,
         weight=0.0,

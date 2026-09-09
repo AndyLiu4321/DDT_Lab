@@ -302,6 +302,11 @@ python scripts/np3o/play.py \
   --keyboard \
   --checkpoint "/home/htw/ddt_lab/logs/np3o/mini_jump/2026-07-03_11-42-49/model_4000.pt"
 
+python scripts/np3o/play.py \
+  --task DDT-jump-Flat-Andy-Play-v0 \
+  --num_envs 50 \
+  --keyboard \
+  --checkpoint "/home/htw/ddt_lab/logs/np3o/mini_jump/2026-07-03_11-42-49/model_4000.pt"
 
 python scripts/np3o/train.py \
   --task DDT-CommandGated-Flat-Tita-v0 \
@@ -388,17 +393,103 @@ python scripts/np3o/train.py \
 
 python scripts/np3o/play.py \
   --task DDT-Stairs-Mini-Play-v0 \
-  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-28_13-47-16/model_2000.pt \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-28_17-39-16/model_2000.pt \
   --num_envs 100 \
   --keyboard
 python scripts/np3o/play.py \
   --task DDT-Stairs-Mini-Play-v0 \
-  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-29_10-16-57/model_4000.pt \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-29_16-15-11/model_4000.pt \
   --num_envs 100 \
   --keyboard
 python scripts/np3o/play.py \
   --task DDT-Stairs-Mini-Play-v0 \
-  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-29_16-15-11/model_3400.pt \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-30_15-36-16/model_4000.pt \
   --num_envs 100 \
   --keyboard
-  
+python scripts/np3o/play.py \
+  --task DDT-Stairs-Mini-Play-v0 \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs/2026-07-31_09-33-25/model_4000.pt \
+  --num_envs 10 \
+  --keyboard
+python scripts/np3o/train.py \
+  --task DDT-Stairs-Jump-Mini-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --headless
+
+python scripts/np3o/play.py \
+  --task DDT-Stairs-Jump-Mini-Play-v0 \
+  --keyboard \
+  --num_envs 20 \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/mini_stairs_perception_jump/2026-08-03_  17-45-08/model_20000.pt \
+  --record_depth \
+  --depth_record_dir /home/htw/ddt_lab/logs/depth_play_2000
+
+python scripts/np3o/train.py \
+  --task=DDT-Stairs-Jump-Mini-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --headless
+
+python scripts/np3o/train.py \
+  --task DDT-Velocity-Flat-Andy-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --device cuda:0 \
+  --headless
+
+
+
+python scripts/np3o/play.py \
+  --task DDT-Recovery-Flat-Andy-v0 \
+  --num_envs 1000 \
+  --keyboard
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_flat/2026-08-24_16-17-59/model_20000.pt \
+  --num_envs 100 \
+  --keyboard
+CUDA_VISIBLE_DEVICES=1 python scripts/np3o/train.py \
+  --task DDT-Velocity-Flat-Andy-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --device cuda:0 \
+  --/renderer/activeGpu=1 \
+  --/physics/cudaDevice=0 \
+  --/renderer/multiGpu/enabled=false \
+  --/renderer/multiGpu/autoEnable=false \
+  --/renderer/multiGpu/maxGpuCount=1 \
+  --headless
+
+
+Recovery
+CUDA_VISIBLE_DEVICES=0 python scripts/np3o/train.py \
+  --task DDT-Recovery-Rough-Andy-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --device cuda:0 \
+  --/renderer/multiGpu/enabled=false \
+  --/renderer/multiGpu/autoEnable=false \
+  --/renderer/multiGpu/maxGpuCount=1 \
+  --headless 
+CUDA_VISIBLE_DEVICES=0 python scripts/np3o/train.py \
+  --task DDT-Recovery-Flat-Andy-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --device cuda:1 \
+  --/renderer/multiGpu/enabled=false \
+  --/renderer/multiGpu/autoEnable=false \
+  --/renderer/multiGpu/maxGpuCount=1 \
+  --headless 
+
+
+python scripts/np3o/play.py \
+  --task DDT-jump-Flat-Andy-v0 \
+  --num_envs 4096 \
+  --keyboard
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_flat/2026-08-24_16-17-59/model_20000.pt \
+  --keyboard
+python scripts/np3o/play.py \
+  --task DDT-jump-Flat-Andy-Play-v0 \
+  --num_envs 100 \
+  --keyboard
+  --num_envs 100 \
+  --keyboard

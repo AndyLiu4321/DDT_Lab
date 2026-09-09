@@ -40,7 +40,7 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="../meshes/base_link.STL"/>
+        <mesh filename="/home/htw/ddt_lab/ddt_ros2_control/urdfs/andymini/meshes/base_link.STL"/>
       </geometry>
       <material name="black"/>
     </visual>
