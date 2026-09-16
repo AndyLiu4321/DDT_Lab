@@ -40,11 +40,7 @@ parser.add_argument(
     "--keyboard",
     action="store_true",
     default=False,
-    help="Enable keyboard control (W/S=fwd/bwd  A/D=strafe  Q/E=turn  Space=stop).",
-)
-parser.add_argument(
-    '--keyboard', action='store_true',
-    help='Use keyboard commands during play. Command-gated Tita uses 6-D commands; legacy jump tasks keep R for jump.',
+    help="Enable keyboard control (W/S=forward/back, A/D=strafe or Andy height down/up, Q/E=turn).",
 )
 parser.add_argument(
     '--allow_mismatched_checkpoint', action='store_true',
@@ -349,6 +345,17 @@ class KeyboardCommandController:
         self._velocity_command_name = self._wheel_command_name or ("base_velocity" if "base_velocity" in active_command_terms else None)
         self._is_wheel_command = self._wheel_command_name is not None
         self.command = torch.zeros(self.unwrapped.num_envs, 6 if self._is_wheel_command else 3, device=self.device)
+        from ddt_lab.tasks.manager_based.locomotion.robots.andy.height_mdp import HeightCommand
+
+        term = (self.unwrapped.command_manager.get_term(self._velocity_command_name)
+                if self._velocity_command_name else None)
+        self._is_height_command = isinstance(term, HeightCommand)
+        self._height_target = 0.32
+        self._height_update_time = time.monotonic()
+        if self._is_height_command:
+            self._height_limits = term.cfg.base_height
+            self._height_target = max(self._height_limits[0], min(self._height_limits[1], self._height_target))
+            self.command[:, 1] = self._height_target
         self.jump_command = torch.zeros(self.unwrapped.num_envs, 1, device=self.device)
         self._velocity_history: torch.Tensor | None = None
         self._jump_history: torch.Tensor | None = None
@@ -391,10 +398,14 @@ class KeyboardCommandController:
         else:
             self._setup_terminal_keyboard()
 
-        if (self._jump_slice is None or not self._has_jump_command) and not self._is_wheel_command:
+        if (self._jump_slice is None or not self._has_jump_command) and not self._is_wheel_command and not self._is_height_command:
             print("[INFO] Keyboard R is captured, but this policy observation has no jump command term.")
             print("[INFO] To make R drive jumping, add a jump command observation during training/play with the same policy dimension.")
-        if self._source == "terminal":
+        if self._is_height_command:
+            print(f"[INFO] Height keyboard ({self._source}): A lower / D raise, "
+                  "W/S forward/back, Q/E yaw, Space stop (keep height). "
+                  f"Height range: {self._height_limits[0]:.2f}–{self._height_limits[1]:.2f} m.")
+        elif self._source == "terminal":
             print("[INFO] Terminal keyboard control is active. Keep this terminal focused.")
             if self._is_wheel_command:
                 print("[INFO] W/S vx, A/D vy, Q/E wz, Space up, C/Ctrl down, 1/2 single leg, arrows tsk, Backspace tsk=0, Shift slow, R reset.")
@@ -530,8 +541,19 @@ class KeyboardCommandController:
         lin_scale = 0.35 if slow else 1.0
         ang_scale = 0.35 if slow else 1.0
         self.command[:, 0] = x * self._lin_vel * lin_scale
-        self.command[:, 1] = y * self._lin_vel * lin_scale
+        if self._is_height_command:
+            now = time.monotonic()
+            elapsed = min(max(now - self._height_update_time, 0.0), 0.1)
+            self._height_update_time = now
+            self._height_target = max(self._height_limits[0], min(
+                self._height_limits[1], self._height_target - y * 0.10 * elapsed * lin_scale))
+            self.command[:, 1] = self._height_target
+        else:
+            self.command[:, 1] = y * self._lin_vel * lin_scale
         self.command[:, 2] = yaw * self._ang_vel * ang_scale
+        if self._is_height_command and ("SPACE" in active or " " in active):
+            self.command[:, 0] = 0.0
+            self.command[:, 2] = 0.0
         if self._is_wheel_command:
             up = "SPACE" in active or " " in active
             down = bool({"C", "LEFT_CONTROL", "RIGHT_CONTROL"} & set(active))
@@ -724,6 +746,8 @@ class KeyboardCommandController:
                     bool(cmd_norm[0].item() < 1e-4),
                 )
 
+            if self._is_height_command:
+                msg = msg.replace("vy=", "height=")
             if self._velocity_slice is not None:
                 if obs.dim() == 2:
                     obs_cmd = obs[0, self._velocity_slice].detach().cpu().numpy()
@@ -767,10 +791,14 @@ def main():
     env_cfg.scene.num_envs = args_cli.num_envs
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
 
+    # Height play uses manual commands by default, including the short --task invocation.
+    if args_cli.task == "DDT-Height-Flat-Andy-Play-v0":
+        args_cli.keyboard = True
     if args_cli.keyboard:
         env_cfg.scene.num_envs = 1
         env_cfg.terminations.time_out = None
-        env_cfg.commands.base_velocity.heading_command = False
+        if hasattr(env_cfg.commands.base_velocity, "heading_command"):
+            env_cfg.commands.base_velocity.heading_command = False
 
     env = gym.make(args_cli.task, cfg=env_cfg)
     env = IsaacLabNP3OWrapper(env, device=args_cli.device or "cuda:0")

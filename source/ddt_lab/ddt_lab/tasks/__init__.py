@@ -12,6 +12,8 @@
 from isaaclab_tasks.utils import import_packages
 
 # The blacklist is used to prevent importing configs from sub-packages
-_BLACKLIST_PKGS = ["utils", ".mdp"]
+# AndyMini is an Isaac Gym reference, not an Isaac Lab task package.
+# The importer matches substrings, so this also excludes renamed copies such as 1andymini.
+_BLACKLIST_PKGS = ["utils", ".mdp", "andymini"]
 # Import all configs in this package
 import_packages(__name__, _BLACKLIST_PKGS)

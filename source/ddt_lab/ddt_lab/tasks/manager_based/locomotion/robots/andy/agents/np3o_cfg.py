@@ -27,3 +27,11 @@ def andy_jump_np3o_runner_cfg() -> dict:
     cfg["runner"]["experiment_name"] = "andy_jump"
     cfg["runner"]["max_iterations"] = 20000
     return cfg
+
+
+def andy_height_np3o_runner_cfg() -> dict:
+    """Use the existing Andy flat NP3O training pipeline."""
+    cfg = andy_flat_np3o_runner_cfg()
+    cfg["runner"]["experiment_name"] = "andy_height"
+    cfg["runner"]["max_iterations"] = 20000
+    return cfg

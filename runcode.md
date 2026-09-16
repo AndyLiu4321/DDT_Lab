@@ -493,3 +493,13 @@ python scripts/np3o/play.py \
   --keyboard
   --num_envs 100 \
   --keyboard
+
+python scripts/np3o/train.py \
+  --task DDT-Height-Flat-Andy-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000
+python scripts/np3o/play.py \
+  --task DDT-Height-Flat-Andy-Play-v0 \
+  --num_envs 100 \
+  --max_iterations 20000
+  

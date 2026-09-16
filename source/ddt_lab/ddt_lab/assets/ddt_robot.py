@@ -72,17 +72,19 @@ DDT_ANDY_CFG = ArticulationCfg(
     actuators={
         "legs": DCMotorCfg(
             joint_names_expr=[".*_leg_(1|2)"],
-            effort_limit=60.0,
-            saturation_effort=80.0,
-            velocity_limit=30,
-            stiffness=60.0,
-            damping=1.5,
+            # andymini.urdf: effort=11 N*m, velocity=12.57 rad/s.
+            # No separate stall torque is specified; use the URDF effort limit.
+            effort_limit=11.0,
+            saturation_effort=11.0,
+            velocity_limit=12.57,
+            stiffness=40.0,
+            damping=1,
             friction=0.0,
         ),
         "drive_wheels": ImplicitActuatorCfg(
             joint_names_expr=[".*_leg_3"],
-            effort_limit_sim=12.0,
-            velocity_limit_sim=30,
+            effort_limit_sim=11.0,
+            velocity_limit_sim=12.57,
             stiffness=0.0,
             damping=0.5,
             friction=0.0,

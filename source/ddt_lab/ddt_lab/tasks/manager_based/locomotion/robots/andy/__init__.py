@@ -7,7 +7,7 @@
 
 import gymnasium as gym
 
-from . import agents, flat_env_cfg, jump_env_cfg, recovery_env_cfg, rough_env_cfg
+from . import agents, flat_env_cfg, height_env_cfg, jump_env_cfg, recovery_env_cfg, rough_env_cfg
 
 
 def _register(task_id: str, env_cfg, runner: str) -> None:
@@ -42,3 +42,6 @@ _register(
     jump_env_cfg.AndyJumpFlatEnvCfg_PLAY,
     "andy_jump_np3o_runner_cfg",
 )
+
+_register("DDT-Height-Flat-Andy-v0", height_env_cfg.AndyHeightFlatEnvCfg, "andy_height_np3o_runner_cfg")
+_register("DDT-Height-Flat-Andy-Play-v0", height_env_cfg.AndyHeightFlatEnvCfg_PLAY, "andy_height_np3o_runner_cfg")
