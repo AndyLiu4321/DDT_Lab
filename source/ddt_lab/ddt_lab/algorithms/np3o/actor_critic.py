@@ -443,21 +443,10 @@ class ActorCriticBarlowTwins(nn.Module):
 
 
 class _InferenceWrapper(torch.nn.Module):
-    """Inference-only wrapper: receives the full history buffer and reproduces
-    the reference NP3O ONNX graph shape.
+    """Match training: history is oldest-to-newest and ends in current.
 
-    Layout of ``history`` is assumed to be ``[t-history_len+1, ..., t-1, t]``
-    (latest frame at the end — same as the env-side ObsGroup history). The
-    forward path mirrors the reference pipeline exactly:
-
-        history → Slice [:, 1:]         (drop oldest frame)
-                → Concat with current   (append current at the end)
-                → Slice [:, -bt_window:] (take last ``bt_window`` frames)
-                → Reshape → MLP encoder → ...
-
-    This is mathematically equivalent to slicing ``history[:, -bt_window-1:-1]``
-    upfront, but emits the same node sequence as the legacy export so deployment
-    runtimes that pattern-match on the graph keep working.
+    Training splits preceding frames, then the backbone shifts that window
+    and appends current. Reproduce both operations without duplicating current.
     """
 
     def __init__(self, backbone: torch.nn.Module, history_len: int, bt_window: int):
@@ -472,10 +461,9 @@ class _InferenceWrapper(torch.nn.Module):
         b, t, d = history.shape
         history_n = self.backbone.obs_normalizer(history.reshape(-1, d)).reshape(b, t, d)
 
-        # 2) reference-style slice → concat → slice
-        drop_first = history_n[:, 1:, :]  # (B, history_len-1, num_prop)
-        full = torch.cat([drop_first, current_n.unsqueeze(1)], dim=1)  # (B, history_len, num_prop)
-        window = full[:, -self.bt_window :, :]  # (B, bt_window, num_prop)
+        # 2) Same preceding-frame window as _split_policy_obs during training.
+        preceding = history_n[:, -self.bt_window - 1 : -1, :]
+        window = torch.cat([preceding[:, 1:, :], current_n.unsqueeze(1)], dim=1)
 
         # 3) BarlowTwins MLP encoder + vel/latent heads + actor MLP
         latent = self.backbone.mlp_encoder(window.reshape(current_n.shape[0], -1))

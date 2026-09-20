@@ -35,3 +35,15 @@ def andy_height_np3o_runner_cfg() -> dict:
     cfg["runner"]["experiment_name"] = "andy_height"
     cfg["runner"]["max_iterations"] = 20000
     return cfg
+
+
+def andy_pace_height_np3o_runner_cfg() -> dict:
+    """Compatibility entry point for historical saved runner configurations."""
+    from ..pace.agents import andy_pace_height_np3o_runner_cfg as create
+    return create()
+
+
+def andy_pace_robust_height_np3o_runner_cfg() -> dict:
+    """Compatibility entry point for historical saved runner configurations."""
+    from ..pace.agents import andy_pace_robust_height_np3o_runner_cfg as create
+    return create()

@@ -1,6 +1,7 @@
 """Andy flat-ground height control: [forward velocity, height, yaw rate]."""
 
 from isaaclab.managers import RewardTermCfg as RewTerm, SceneEntityCfg, TerminationTermCfg as DoneTerm
+from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.utils import configclass
 import ddt_lab.tasks.manager_based.locomotion.mdp as mdp
 
@@ -66,10 +67,18 @@ class AndyHeightFlatEnvCfg(AndyFlatEnvCfg):
         self.rewards.upward = None
         self.rewards.upright_progress = None
         self.rewards.auxiliary_wheel_contacts = None
-        # 动态高度奖励：6 × exp(-高度误差平方 / 0.0025)，另加 -10 × 绝对误差。
-        # 高度相对平地环境原点计算；误差 0.05 m 时，指数项为 exp(-1)。
-        self.rewards.tracking_base_height = RewTerm(func=height_mdp.tracking_height, weight=6.0)
-        self.rewards.base_height_error = RewTerm(func=height_mdp.height_error, weight=-10.0)
+        # 目标高度仍为 0.22–0.37 m，允许目标两侧 ±0.01 m 的误差带。
+        # e = max(|实际高度-目标高度| - 0.01, 0)，奖励 6*exp(-e²/0.0049)。
+        # 带内满分且不惩罚；带外指数宽度 0.07 m（总误差 0.08 m 时为 exp(-1)）。
+        # 线性误差惩罚也只作用于带外，避免与放宽后的跟踪奖励冲突。
+        self.rewards.tracking_base_height = RewTerm(
+            func=height_mdp.tracking_height, weight=6.0,
+            params={"sigma": 0.07**2, "tolerance": 0.01},
+        )
+        self.rewards.base_height_error = RewTerm(
+            func=height_mdp.height_error, weight=-10.0,
+            params={"tolerance": 0.01},
+        )
         # 目标高度 <= 0.22 m 时奖励辅助轮接地；更高时惩罚辅助轮接地。
         # 接触力模长 > 1 N 判定接触；两侧辅助轮各贡献一半。
         for name, low, weight in (("auxiliary_contact_low", True, 2.0),
@@ -111,7 +120,17 @@ class AndyHeightFlatEnvCfg(AndyFlatEnvCfg):
         #   randomize_actuator_gains：六个受控关节 Kp/Kd 乘 [0.8, 1.2]，对数均匀分布。
         #   reset_base：XY 偏移 ±0.5 m，偏航 ±3.14 rad；各轴线/角速度 ±0.5。
         #   reset_robot_joints：默认关节角乘 [-0.5, 1.0] 后裁剪到限位，关节速度为 0。
-        # base_external_force_torque 和 push_robot 已在 AndyRoughEnvCfg 中关闭。
+        # 持续外力仍关闭；高度训练显式启用周期速度扰动。
+        # 当前 Isaac Lab 实现向世界坐标系根速度添加采样增量，不是持续施力。
+        self.events.push_robot = EventTerm(
+            func=mdp.push_by_setting_velocity,
+            mode="interval",
+            interval_range_s=(5.0, 10.0),
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+                "velocity_range": {"x": (-0.3, 0.3), "y": (-0.3, 0.3)},
+            },
+        )
         # 策略观测噪声在父类 ObservationsCfg 中配置，训练默认开启。
         #
         # 只修改此高度任务时，在本方法内覆盖对应事件参数，例如：
@@ -138,3 +157,4 @@ class AndyHeightFlatEnvCfg_PLAY(AndyHeightFlatEnvCfg):
         self.events.add_base_inertia = None
         self.events.add_base_com = None
         self.events.randomize_actuator_gains = None
+        self.events.push_robot = None  # 普通回放不自动施加推扰。

@@ -45,3 +45,6 @@ _register(
 
 _register("DDT-Height-Flat-Andy-v0", height_env_cfg.AndyHeightFlatEnvCfg, "andy_height_np3o_runner_cfg")
 _register("DDT-Height-Flat-Andy-Play-v0", height_env_cfg.AndyHeightFlatEnvCfg_PLAY, "andy_height_np3o_runner_cfg")
+
+# PACE owns its task registrations and historical import aliases.
+from . import pace  # noqa: F401

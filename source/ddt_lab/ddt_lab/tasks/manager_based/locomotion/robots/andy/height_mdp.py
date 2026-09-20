@@ -70,12 +70,14 @@ def base_height(env):
     return env.scene["robot"].data.root_pos_w[:, 2] - env.scene.env_origins[:, 2]
 
 
-def height_error(env, command_name="base_velocity"):
-    return (base_height(env) - env.command_manager.get_command(command_name)[:, 1]).abs()
+def height_error(env, command_name="base_velocity", tolerance=0.0):
+    """Absolute height error outside a symmetric tolerance band (meters)."""
+    error = (base_height(env) - env.command_manager.get_command(command_name)[:, 1]).abs()
+    return (error - tolerance).clamp_min(0.0)
 
 
-def tracking_height(env, command_name="base_velocity", sigma=0.0025):
-    return torch.exp(-height_error(env, command_name).square() / sigma)
+def tracking_height(env, command_name="base_velocity", sigma=0.0025, tolerance=0.0):
+    return torch.exp(-height_error(env, command_name, tolerance).square() / sigma)
 
 
 def tracking_forward(env, command_name="base_velocity", sigma=0.25):

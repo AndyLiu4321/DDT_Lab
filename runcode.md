@@ -435,18 +435,15 @@ python scripts/np3o/train.py \
   --task DDT-Velocity-Flat-Andy-v0 \
   --num_envs 4096 \
   --max_iterations 20000 \
-  --device cuda:0 \
   --headless
 
 
 
 python scripts/np3o/play.py \
-  --task DDT-Recovery-Flat-Andy-v0 \
-  --num_envs 1000 \
-  --keyboard
-  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_flat/2026-08-24_16-17-59/model_20000.pt \
+  --task DDT-Velocity-Flat-Andy-v0 \
   --num_envs 100 \
   --keyboard
+
 CUDA_VISIBLE_DEVICES=1 python scripts/np3o/train.py \
   --task DDT-Velocity-Flat-Andy-v0 \
   --num_envs 4096 \
@@ -498,8 +495,71 @@ python scripts/np3o/train.py \
   --task DDT-Height-Flat-Andy-v0 \
   --num_envs 4096 \
   --max_iterations 20000
+python scripts/np3o/train.py \
+  --task DDT-Height-Flat-Andy-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --resume \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_height/2026-09-15_18-03-04/model_20000.pt \
+  --headless \
+  --experiment_name andy_height_resume
 python scripts/np3o/play.py \
   --task DDT-Height-Flat-Andy-Play-v0 \
   --num_envs 100 \
-  --max_iterations 20000
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_height_resume/2026-09-17_11-23-10/model_11900.pt
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_height/2026-09-17_09-57-38/model_6400.pt
   
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_height/2026-09-10_15-30-10/model_2300.pt
+  /home/htw/ddt_lab/logs/np3o/andy_height/2026-09-17_09-57-38/model_6400.pt
+python scripts/np3o/play.py \
+  --task DDT-Height-Flat-Andy-Play-v0 \
+  --num_envs 100 \
+
+
+cd /home/htw/ddt_lab
+conda activate isaaclab-pace
+
+python scripts/np3o/train.py \
+  --task DDT-Height-Flat-Andy-Pace-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --headless
+python scripts/np3o/play.py \
+  --task DDT-Height-Flat-Andy-Pace-Play-v0 \
+  --num_envs 1 \
+  --keyboard
+
+
+python scripts/np3o/train.py \
+  --task DDT-Height-Flat-Andy-Pace-Robust-v0 \
+  --num_envs 4096 \
+  --max_iterations 5000 \
+  --resume \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_height_pace/2026-09-18_08-52-36/model_5600.pt \
+  --headless
+python scripts/np3o/play.py \
+  --task DDT-Height-Flat-Andy-Pace-Robust-Play-v0 \
+  --num_envs 100 \
+  --keyboard
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_height_pace_robust/2026-09-18_15-59-30/model_400.pt
+DDT-Height-Flat-Andy-Pace-Play-v0
+
+python scripts/np3o/play.py \
+  --task DDT-Height-Flat-Andy-Pace-Robust-Play-v0 \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_height_pace_robust_stationary/2026-09-18_18-13-51/model_5000.pt \
+  --num_envs 1 \
+  --keyboard
+
+cd /home/htw/ddt_lab
+conda activate isaaclab-pace
+
+python scripts/sim2sim/andy_height_mujoco_rl_sar.py \
+  --task DDT-Height-Flat-Andy-Pace-Robust-Play-v0 \
+  --num_envs 1 \
+  --keyboard \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_height_pace/2026-09-20_11-33-24
+
+  python scripts/np3o/play.py \
+  --task DDT-Height-Flat-Andy-Pace-Play-v0 \
+  --num_envs 1 --keyboard \
+  --checkpoint /home/htw/ddt_lab/logs/np3o/andy_height_pace/2026-09-20_11-33-24/model_2100.pt

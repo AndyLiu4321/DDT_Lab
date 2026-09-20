@@ -9,6 +9,9 @@ import argparse
 import atexit
 import csv
 import importlib
+import hashlib
+import json
+from pathlib import Path
 import os
 import select
 import sys
@@ -813,6 +816,18 @@ def main():
     # would be a one-line guard; we keep it on by default since it's cheap.
     export_dir = args_cli.export_dir or os.path.join(os.path.dirname(ckpt), "exported")
     runner.alg.actor_critic.save_torch_jit_policy(export_dir, args_cli.device or "cuda:0")
+    # Record provenance only after both exports succeed. Sim2sim uses this to
+    # avoid deploying an ONNX exported from a different checkpoint in this run.
+    export_root = Path(export_dir)
+    manifest = {
+        "checkpoint": str(Path(ckpt).resolve()),
+        "checkpoint_sha256": hashlib.sha256(Path(ckpt).read_bytes()).hexdigest(),
+        "task": args_cli.task,
+        "onnx_sha256": hashlib.sha256((export_root / "policy.onnx").read_bytes()).hexdigest(),
+    }
+    manifest_tmp = export_root / "export_manifest.json.tmp"
+    manifest_tmp.write_text(json.dumps(manifest, indent=2) + "\n")
+    manifest_tmp.replace(export_root / "export_manifest.json")
     if args_cli.export_policy:
         # --export_policy explicitly requested: skip rollout, just export.
         env.env.close()

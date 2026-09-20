@@ -1,0 +1,72 @@
+"""Moderate domain randomization around the PACE Height candidate."""
+from isaaclab.envs import mdp
+from isaaclab.managers import EventTermCfg, CurriculumTermCfg, SceneEntityCfg, RewardTermCfg
+from isaaclab.utils import configclass
+from isaaclab.utils.noise import UniformNoiseCfg
+
+from .height_env_cfg import AndyPaceHeightFlatEnvCfg
+from ..rough_env_cfg import ANDY_ACTUATED_JOINTS, ANDY_POSITION_JOINTS
+from .stationary_mdp import (StationaryRobustHeightCommand, stationary_translation,
+    stationary_yaw, stationary_tracking, stationary_leg_motion)
+from .robust_mdp import RobustHeightCommand, progressive_push, push_curriculum
+
+
+@configclass
+class AndyPaceRobustHeightFlatEnvCfg(AndyPaceHeightFlatEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.base_velocity.class_type = StationaryRobustHeightCommand
+        self.commands.base_velocity.standing_fraction = 0.4
+        # Explicit zero-command base penalties remain active during height changes.
+        self.rewards.stationary_motion = None
+        self.rewards.stationary_translation = RewardTermCfg(func=stationary_translation, weight=-2.0)
+        self.rewards.stationary_yaw = RewardTermCfg(func=stationary_yaw, weight=-0.5)
+        self.rewards.stationary_tracking = RewardTermCfg(func=stationary_tracking, weight=1.0)
+        self.rewards.stationary_leg_motion = RewardTermCfg(
+            func=stationary_leg_motion, weight=-0.05,
+            params={'asset_cfg': SceneEntityCfg('robot', joint_names=ANDY_POSITION_JOINTS)})
+        self.rewards.action_rate_l2.weight = -0.15
+        def motors():
+            return SceneEntityCfg('robot', joint_names=ANDY_ACTUATED_JOINTS, preserve_order=True)
+        self.events.randomize_actuator_gains = EventTermCfg(
+            func=mdp.randomize_actuator_gains, mode='reset', params={
+                'asset_cfg': motors(), 'stiffness_distribution_params': (.9, 1.1),
+                'damping_distribution_params': (.9, 1.1), 'operation': 'scale', 'distribution': 'uniform'})
+        self.events.pace_joint_parameters = EventTermCfg(
+            func=mdp.randomize_joint_parameters, mode='startup', params={
+                'asset_cfg': motors(), 'friction_distribution_params': (.9, 1.1),
+                'armature_distribution_params': (.9, 1.1), 'operation': 'scale', 'distribution': 'uniform'})
+        self.events.add_base_mass = EventTermCfg(
+            func=mdp.randomize_rigid_body_mass, mode='startup', params={
+                'asset_cfg': SceneEntityCfg('robot', body_names='base_link'),
+                'mass_distribution_params': (.95, 1.05), 'operation': 'scale'})
+        self.events.add_base_com = EventTermCfg(
+            func=mdp.randomize_rigid_body_com, mode='startup', params={
+                'asset_cfg': SceneEntityCfg('robot', body_names='base_link'),
+                'com_range': {'x': (-.003, .003), 'y': (-.003, .003), 'z': (-.003, .003)}})
+        self.events.physics_material = EventTermCfg(
+            func=mdp.randomize_rigid_body_material, mode='startup', params={
+                'asset_cfg': SceneEntityCfg('robot', body_names='.*'),
+                'static_friction_range': (.7, 1.0), 'dynamic_friction_range': (.6, .9),
+                'restitution_range': (0., .05), 'num_buckets': 64, 'make_consistent': True})
+        self.events.reset_robot_joints.params['position_range'] = (-.03, .03)
+        self.events.reset_robot_joints.params['velocity_range'] = (-.05, .05)
+        # Noise is applied in physical units before each observation's scale.
+        policy = self.observations.policy
+        policy.enable_corruption = True
+        policy.base_ang_vel.noise = UniformNoiseCfg(n_min=-.1, n_max=.1)
+        policy.projected_gravity.noise = UniformNoiseCfg(n_min=-.02, n_max=.02)
+        policy.joint_pos.noise = UniformNoiseCfg(n_min=-.005, n_max=.005)
+        policy.joint_vel.noise = UniformNoiseCfg(n_min=-.2, n_max=.2)
+        self.observations.critic.enable_corruption = False
+        self.events.push_robot = EventTermCfg(func=progressive_push, mode='interval', interval_range_s=(8., 12.))
+        self.curriculum.pace_push = CurriculumTermCfg(func=push_curriculum, params={
+            'min_steps': 5000, 'min_episodes': 1024})
+
+
+@configclass
+class AndyPaceRobustHeightFlatEnvCfg_PLAY(AndyPaceRobustHeightFlatEnvCfg):
+    """Robustness evaluation with randomized dynamics and observation noise."""
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 50

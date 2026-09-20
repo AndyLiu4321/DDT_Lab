@@ -1,0 +1,7 @@
+{
+  "checkpoint": "/home/htw/ddt_lab/logs/np3o/andy_height_pace/2026-09-20_11-33-24/model_2200.pt",
+  "checkpoint_sha256": "bb6f7bee2cf361f2853d49621ab654b0ba3948a44b87c0d244c6d97f1b54137f",
+  "task": "DDT-Height-Flat-Andy-Pace-Robust-Play-v0",
+  "onnx_sha256": "8ea0e79a75b60f4b00f378e4b420a0d00dafaf7af91cc57f6302d3ccccbdbdb0",
+  "source_onnx": "/home/htw/ddt_lab/logs/np3o/andy_height_pace/2026-09-20_11-33-24/exported/policy.onnx"
+}
