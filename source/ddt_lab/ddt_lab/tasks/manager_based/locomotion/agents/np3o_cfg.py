@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -55,7 +55,6 @@ _BASE_NP3O_RUNNER_CFG = {
     # ActorCriticBarlowTwins (LeggedRobotCfgPPO.policy + reference's hard-coded BT sizes)
     "policy": {
         "init_noise_std": 1.0,
-        # "noise_std_type": "log",      # exp-parameterised std → never collapses to 0
         "actor_hidden_dims": [512, 256, 128],
         "critic_hidden_dims": [512, 256, 128],
         "priv_encoder_dims": [],          # [] = Identity (D1FlatCfgPPO default)

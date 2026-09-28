@@ -1,0 +1,52 @@
+{
+  "run": "26_09_17_17-19-36",
+  "iteration": 110,
+  "samples": 6000,
+  "score": 0.0005746157528982993,
+  "rmse": {
+    "joint_left_leg_1": 0.010035713513862565,
+    "joint_left_leg_2": 0.009269891374981845,
+    "joint_left_leg_3": 0.04390029197992148,
+    "joint_right_leg_1": 0.01337797539543393,
+    "joint_right_leg_2": 0.01266372682498716,
+    "joint_right_leg_3": 0.054181881668116036
+  },
+  "parameters": {
+    "armature": {
+      "joint_left_leg_1": 0.0015224696835502982,
+      "joint_left_leg_2": 0.018755905330181122,
+      "joint_left_leg_3": 0.008681964129209518,
+      "joint_right_leg_1": 0.0026112908963114023,
+      "joint_right_leg_2": 0.024815088137984276,
+      "joint_right_leg_3": 0.009441200643777847
+    },
+    "viscous_friction": {
+      "joint_left_leg_1": 0.28337717056274414,
+      "joint_left_leg_2": 0.32769694924354553,
+      "joint_left_leg_3": 0.0035212934017181396,
+      "joint_right_leg_1": 0.36728307604789734,
+      "joint_right_leg_2": 0.28156816959381104,
+      "joint_right_leg_3": 0.0027729570865631104
+    },
+    "friction": {
+      "joint_left_leg_1": 0.2043420970439911,
+      "joint_left_leg_2": 0.1248980164527893,
+      "joint_left_leg_3": 0.07259160280227661,
+      "joint_right_leg_1": 0.15403646230697632,
+      "joint_right_leg_2": 0.18257206678390503,
+      "joint_right_leg_3": 0.06609556078910828
+    },
+    "encoder_bias": {
+      "joint_left_leg_1": 0.09953863173723221,
+      "joint_left_leg_2": -0.057265352457761765,
+      "joint_left_leg_3": 0.0,
+      "joint_right_leg_1": 0.09992716461420059,
+      "joint_right_leg_2": 0.002794623374938965,
+      "joint_right_leg_3": 0.0
+    },
+    "delay_steps_continuous": 0.7624435424804688,
+    "delay_steps_applied": 0
+  },
+  "physics_dt_s": null,
+  "note": "Best evaluated candidate reconstructed from TensorBoard, NOT CMA mean. Physics dt not saved in config; confirm original launch command."
+}

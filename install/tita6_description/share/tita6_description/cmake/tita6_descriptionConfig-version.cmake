@@ -1,0 +1,1 @@
+/home/htw/ddt_lab/build/tita6_description/ament_cmake_core/tita6_descriptionConfig-version.cmake

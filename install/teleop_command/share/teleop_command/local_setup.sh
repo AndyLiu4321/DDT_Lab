@@ -1,0 +1,1 @@
+/home/htw/ddt_lab/build/teleop_command/ament_cmake_environment_hooks/local_setup.sh

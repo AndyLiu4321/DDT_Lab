@@ -1,0 +1,67 @@
+andymini/robot_lab:
+  # Deployed policy provenance is recorded in policy_source.json.
+  # Control settings below remain the rl_sar deployment configuration.
+  model_name: "policy.onnx"
+
+  # ONNX: nn_input0 [1,27], nn_input1 [1,10,27], nn_output [1,6].
+  # The ONNX graph already contains the learned observation normalizer. The
+  # scales below are still required before entering the model.
+  num_obs: 27
+  num_observations: 27
+  observations: ["ang_vel", "gravity", "commands", "dof_pos", "dof_vel", "last_actions"]
+
+  # ObservationBuffer index 0 is newest. Feed t-10 ... t-1 oldest-to-newest;
+  # obs_t is supplied separately and inserted only after inference.
+  observations_history: [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+  observations_history_priority: "time"
+  separate_history_input: true
+  history_excludes_current: true
+  history_input_flat: false
+  # Isaac Lab CircularBuffer fills every slot with the first observation.
+  history_initialization: "repeat_first"
+
+  # Validate the new contract before enabling Gazebo motor output.
+  dry_run: false
+  control_type: "P_V"
+  clip_obs: 100.0
+  clip_actions_lower: [-100.0, -100.0, -100.0, -100.0, -100.0, -100.0]
+  clip_actions_upper: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
+
+  num_of_dofs: 6
+  # Policy/controller order: L1, L2, left driven wheel, R1, R2, right driven wheel.
+  default_dof_pos: [0.0, 0.66, 0.0, 0.0, 0.66, 0.0]
+  observation_default_dof_pos: [0.0, 0.66, 0.0, 0.0, 0.66, 0.0]
+  obs_joint_reindex: [0, 1, 2, 3, 4, 5]
+  action_reindex: [0, 1, 2, 3, 4, 5]
+  wheel_indices: [2, 5]
+  obs_wheel_indices: [2, 5]
+
+  # Isaac Lab action scales: L1/R1 position 0.15 rad, L2/R2 position
+  # 0.66 rad, and driven-wheel velocity 10 rad/s.
+  action_scale: [0.15, 0.66, 10.0, 0.15, 0.66, 10.0]
+  rl_kp: [40.0, 40.0, 0.0, 40.0, 40.0, 0.0]
+  rl_kd: [1.0, 1.0, 0.5, 1.0, 1.0, 0.5]
+  fixed_kp: [40.0, 40.0, 0.0, 40.0, 40.0, 0.0]
+  fixed_kd: [1.0, 1.0, 0.5, 1.0, 1.0, 0.5]
+  torque_limits: [11.0, 11.0, 11.0, 11.0, 11.0, 11.0]
+
+  # obs_t layout:
+  # [0:3] ang_vel*0.25, [3:6] projected_gravity,
+  # [6:9] [vx*2, base_height*5, wz*0.25],
+  # [9:15] joint_pos-default (wheel positions forced to zero),
+  # [15:21] joint_vel*0.05, [21:27] previous raw action.
+  ang_vel_scale: 0.25
+  dof_pos_scale: 1.0
+  dof_vel_scale: 0.05
+  commands_scale: [2.0, 5.0, 0.25]
+  command_lower: [-0.6, 0.22, -0.6]
+  command_upper: [0.6, 0.37, 0.6]
+  initial_commands: [0.0, 0.30, 0.0]
+  command_reset: [0.0, 0.30, 0.0]
+
+  # Match Gazebo/Isaac Lab articulation limits. Wheel position entries are
+  # unused by P_V control but remain wide in the mixed output vector.
+  output_pos_lower: [-1.57, 0.0, -62831.85, -1.57, 0.0, -62831.85]
+  output_pos_upper: [0.52, 1.26, 62831.85, 0.52, 1.26, 62831.85]
+  output_vel_lower: [-12.57, -12.57, -12.57, -12.57, -12.57, -12.57]
+  output_vel_upper: [12.57, 12.57, 12.57, 12.57, 12.57, 12.57]

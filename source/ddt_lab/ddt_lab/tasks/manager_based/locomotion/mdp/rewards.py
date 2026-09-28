@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -16,6 +16,8 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils.math import quat_apply_inverse, yaw_quat
+
+from .terrain_features import forward_height_profile
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -50,6 +52,7 @@ def track_ang_vel_z_exp(
     return reward
 
 
+
 def track_lin_vel_xy_yaw_frame_exp(
     env, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -76,11 +79,122 @@ def track_ang_vel_z_world_exp(
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
+
+def tracking_lin_x_vel_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Track commanded forward velocity for the 6-D wheel-legged command."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    error = torch.square(env.command_manager.get_command(command_name)[:, 0] - asset.data.root_lin_vel_b[:, 0])
+    return torch.exp(-error / sigma)
+
+
+def tracking_lin_y_vel_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Track commanded lateral velocity. Weight can be zero for non-holonomic robots."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    error = torch.square(env.command_manager.get_command(command_name)[:, 1] - asset.data.root_lin_vel_b[:, 1])
+    return torch.exp(-error / sigma)
+
+
+def tracking_ang_vel_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Track commanded yaw velocity for the 6-D wheel-legged command."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    error = torch.square(env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_b[:, 2])
+    return torch.exp(-error / sigma)
+
+
+def tracking_leg_length_thigh_l2(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Genesis-compatible first port: track thigh joint positions as leg length commands."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    cmd = env.command_manager.get_command(command_name)
+    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    return torch.square(q[:, 0] - cmd[:, 3]) + torch.square(q[:, 1] - cmd[:, 4])
+
+
+def tsk_hip_tracking_l2(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    opposite_sign: bool = False,
+) -> torch.Tensor:
+    """Track side-impact / lateral hip command with squared error."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    cmd = env.command_manager.get_command(command_name)[:, 5]
+    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    right_target = -cmd if opposite_sign else cmd
+    return torch.square(q[:, 0] - cmd) + torch.square(q[:, 1] - right_target)
+
+
+def similar_calf_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Penalize left/right calf joint mismatch."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    return torch.square(q[:, 0] - q[:, 1])
+
+
+def action_rate_l2_slice(env: ManagerBasedRLEnv, start: int, end: int) -> torch.Tensor:
+    """Penalize action change for a contiguous action slice."""
+    action = env.action_manager.action[:, start:end]
+    prev_action = env.action_manager.prev_action[:, start:end]
+    return torch.sum(torch.square(action - prev_action), dim=1)
+
+
+def feet_distance_range_l2(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    min_distance: float,
+    max_distance: float,
+) -> torch.Tensor:
+    """Penalize two wheel-feet being too close or too far apart."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    foot_pos = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
+    distance = torch.norm(foot_pos[:, 0, :] - foot_pos[:, 1, :], dim=-1)
+    return torch.clamp(min_distance - distance, 0.0, 1.0) + torch.clamp(distance - max_distance, 0.0, 1.0)
+
+
+def projected_gravity_xy_l2_raw(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Raw Genesis-style body tilt penalty: projected_gravity_x^2 + projected_gravity_y^2."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1)
+
+
+def lin_vel_z_l2_raw(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Raw z-axis base linear velocity penalty."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.square(asset.data.root_lin_vel_b[:, 2])
+
+
+def ang_vel_xy_l2_raw(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Raw roll/pitch base angular velocity penalty."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.sum(torch.square(asset.data.root_ang_vel_b[:, :2]), dim=1)
+
 def action_rate_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Penalize the rate of change of the actions using L2 squared kernel."""
     reward = torch.sum(torch.square(env.action_manager.action - env.action_manager.prev_action), dim=1)
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
+
 
 def joint_power(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Reward joint_power"""
@@ -178,6 +292,8 @@ class GaitReward(ManagerTermBase):
         self.max_err: float = cfg.params["max_err"]
         self.velocity_threshold: float = cfg.params["velocity_threshold"]
         self.command_threshold: float = cfg.params["command_threshold"]
+        self.lateral_only: bool = cfg.params.get("lateral_only", False)
+        self.penalize_forward: bool = cfg.params.get("penalize_forward", False)
         self.contact_sensor: ContactSensor = env.scene.sensors[cfg.params["sensor_cfg"].name]
         self.asset: Articulation = env.scene[cfg.params["asset_cfg"].name]
         # match foot body names with corresponding foot body ids
@@ -203,6 +319,8 @@ class GaitReward(ManagerTermBase):
         synced_feet_pair_names,
         asset_cfg: SceneEntityCfg,
         sensor_cfg: SceneEntityCfg,
+        lateral_only: bool = False,
+        penalize_forward: bool = False,
     ) -> torch.Tensor:
         """Compute the reward.
 
@@ -224,14 +342,33 @@ class GaitReward(ManagerTermBase):
         async_reward_2 = self._async_reward_func(self.synced_feet_pairs[0][0], self.synced_feet_pairs[1][1])
         async_reward_3 = self._async_reward_func(self.synced_feet_pairs[1][0], self.synced_feet_pairs[0][1])
         async_reward = async_reward_0 * async_reward_1 * async_reward_2 * async_reward_3
-        # only enforce gait if cmd > 0
-        cmd = torch.linalg.norm(env.command_manager.get_command(self.command_name), dim=1)
-        body_vel = torch.linalg.norm(self.asset.data.root_com_lin_vel_b[:, :2], dim=1)
-        reward = torch.where(
-            torch.logical_or(cmd > self.command_threshold, body_vel > self.velocity_threshold),
-            sync_reward * async_reward,
-            0.0,
-        )
+        # gate: enforce gait only when commanded
+        cmd_raw = env.command_manager.get_command(self.command_name)
+        if self.lateral_only:
+            lat_cmd = torch.norm(cmd_raw[:, 1:3], dim=1)
+            if self.penalize_forward:
+                # three-state signed gate:
+                #   lin_y/ang_z active → +1 (reward trot)
+                #   pure lin_x active  → -1 (penalise trot / encourage rolling)
+                #   neither            →  0
+                fwd_cmd = torch.abs(cmd_raw[:, 0])
+                lat_active = lat_cmd > self.command_threshold
+                pure_fwd = (fwd_cmd > self.command_threshold) & (lat_cmd < self.command_threshold)
+                sign = torch.where(
+                    lat_active,
+                    torch.ones_like(lat_cmd),
+                    torch.where(pure_fwd, -torch.ones_like(lat_cmd), torch.zeros_like(lat_cmd)),
+                )
+                active = sign  # use directly as multiplier below
+                reward = sign * sync_reward * async_reward
+            else:
+                active = lat_cmd > self.command_threshold
+                reward = torch.where(active, sync_reward * async_reward, 0.0)
+        else:
+            cmd = torch.linalg.norm(cmd_raw, dim=1)
+            body_vel = torch.linalg.norm(self.asset.data.root_com_lin_vel_b[:, :2], dim=1)
+            active = torch.logical_or(cmd > self.command_threshold, body_vel > self.velocity_threshold)
+            reward = torch.where(active, sync_reward * async_reward, 0.0)
         reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
         return reward
 
@@ -605,11 +742,19 @@ def feet_slide(
 #     return torch.sum(diff, dim=1)
 
 
-def upward(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """Penalize z-axis base linear velocity using L2 squared kernel."""
+def upward(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str | None = None,
+) -> torch.Tensor:
+    """Reward upright orientation, optionally only outside active jump phases."""
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
     reward = torch.square(1 - asset.data.projected_gravity_b[:, 2])
+    term = _jump_term(env, command_name)
+    if term is not None:
+        standing = (term.jump_stage == term.STAGE_RECOVERY) | (term.jump_stage == term.STAGE_LAND)
+        reward *= standing.float()
     return reward
 
 
@@ -618,6 +763,7 @@ def base_height_l2(
     target_height: float,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     sensor_cfg: SceneEntityCfg | None = None,
+    command_name: str | None = None,
 ) -> torch.Tensor:
     """Penalize asset height from its target using L2 squared kernel.
 
@@ -641,6 +787,10 @@ def base_height_l2(
     # Compute the L2 squared penalty
     reward = torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    term = _jump_term(env, command_name)
+    if term is not None:
+        standing = (term.jump_stage == term.STAGE_RECOVERY) | (term.jump_stage == term.STAGE_LAND)
+        reward *= standing.float()
     return reward
 
 
@@ -702,24 +852,1173 @@ def default_joint_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEn
     return reward
 
 
-def hip_pos(
+def power_distribution_var(
     env: ManagerBasedRLEnv,
-    command_name: str,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    lateral_command_index: int = 1,
-    command_threshold: float = 1.0e-6,
 ) -> torch.Tensor:
-    """Penalize hip joint deviation from default — only when lateral velocity command is ~0.
+    """Penalize uneven power distribution across joints using variance.
 
-    Port of ``LocomotionWithNP3O.D1Flat._reward_hip_pos``: discourages hip
-    abduction when the policy is not commanded to walk sideways.
+    Computes the variance of per-joint mechanical power ``(τ · θ̇)`` across
+    the selected joints.  A high variance means some joints are working much
+    harder than others; penalising it encourages balanced actuation.
+
+    Reference reward: ``var(τ · θ̇)²``, weight ``-1e-5``.
+
+    Shape: ``(num_envs,)``
     """
     asset: Articulation = env.scene[asset_cfg.name]
-    cmd = env.command_manager.get_command(command_name)
-    flag = (cmd[:, lateral_command_index].abs() < command_threshold).float()
-
-    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
-    q_default = asset.data.default_joint_pos[:, asset_cfg.joint_ids]
-    reward = flag * torch.sum(torch.square(q - q_default), dim=1)
+    # per-joint power (B, n_joints)
+    power = asset.data.applied_torque[:, asset_cfg.joint_ids] * asset.data.joint_vel[:, asset_cfg.joint_ids]
+    reward = torch.var(power, dim=1)
     reward *= torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
-    return torch.sum(torch.square(q - q_default), dim=1)
+    return reward
+
+
+# ---------------------------------------------------------------------------
+# Biped gait rewards (ported from pointfoot_flat)
+# ---------------------------------------------------------------------------
+
+def _biped_desired_contact(env: "ManagerBasedRLEnv", cycle_time: float, duty_cycle: float = 0.5) -> torch.Tensor:
+    """Binary desired contact tensor for alternating biped gait.
+
+    Shape: (B, 2) — column 0 = left foot, column 1 = right foot.
+    Left foot is in stance for the first ``duty_cycle`` fraction of each cycle;
+    right foot is in stance for the second ``duty_cycle`` fraction (offset 0.5).
+    """
+    t = env.episode_length_buf.float() * env.step_dt
+    phase = torch.fmod(t / cycle_time, 1.0)                       # (B,) in [0, 1)
+    contact_L = (phase < duty_cycle).float()
+    contact_R = (torch.fmod(phase + 0.5, 1.0) < duty_cycle).float()
+    return torch.stack([contact_L, contact_R], dim=1)              # (B, 2)
+
+
+def tracking_contacts_shaped_force(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+    cycle_time: float,
+    sigma: float = 25.0,
+    duty_cycle: float = 0.5,
+) -> torch.Tensor:
+    """Penalise contact force on the foot that should be in swing phase.
+
+    Mirrors ``BipedPF._reward_tracking_contacts_shaped_force`` (weight=-2).
+    reward_i = (1 - desired_contact_i) * (1 - exp(-F_i² / sigma))
+    Use with a NEGATIVE weight so swing-phase contacts are penalised.
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    foot_forces = torch.norm(
+        contact_sensor.data.net_forces_w_history[:, 0, sensor_cfg.body_ids, :], dim=-1
+    )  # (B, 2)
+    desired = _biped_desired_contact(env, cycle_time, duty_cycle)   # (B, 2)
+    reward = torch.sum(
+        (1.0 - desired) * (1.0 - torch.exp(-foot_forces ** 2 / sigma)), dim=1
+    )
+    return reward
+
+
+def tracking_contacts_shaped_vel(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg,
+    cycle_time: float,
+    sigma: float = 0.25,
+    duty_cycle: float = 0.5,
+) -> torch.Tensor:
+    """Penalise foot horizontal velocity when the foot should be in stance.
+
+    Mirrors ``BipedPF._reward_tracking_contacts_shaped_vel`` (weight=-2).
+    reward_i = desired_contact_i * (1 - exp(-|v_i|² / sigma))
+    Use with a NEGATIVE weight so stance-phase foot sliding is penalised.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    foot_vel_xy = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2]  # (B, 2, 2)
+    foot_vel_norm = torch.norm(foot_vel_xy, dim=-1)                      # (B, 2)
+    desired = _biped_desired_contact(env, cycle_time, duty_cycle)        # (B, 2)
+    reward = torch.sum(
+        desired * (1.0 - torch.exp(-foot_vel_norm ** 2 / sigma)), dim=1
+    )
+    return reward
+
+
+def terrain_roughness_gate(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+    low_height: float = 0.025,
+    high_height: float = 0.08,
+    forward_start_index: int = 2,
+) -> torch.Tensor:
+    """Continuous wheel-to-gait gate derived from upcoming terrain height.
+
+    The scanner is training-only reward information.  The Actor receives the
+    corresponding depth-camera profile and must infer the same transition.
+    The output is zero on flat ground and one once the upcoming absolute
+    height change reaches ``high_height``.
+    """
+    if high_height <= low_height:
+        raise ValueError(
+            f"high_height must exceed low_height, got low={low_height}, high={high_height}."
+        )
+    sensor: RayCaster = env.scene[sensor_cfg.name]
+    profile = forward_height_profile(sensor.data.ray_hits_w)
+    if not 0 <= forward_start_index < profile.shape[1]:
+        raise ValueError(
+            f"forward_start_index must be in [0, {profile.shape[1] - 1}], "
+            f"got {forward_start_index}."
+        )
+    height_change = torch.amax(torch.abs(profile[:, forward_start_index:]), dim=1)
+    gate = torch.clamp(
+        (height_change - low_height) / (high_height - low_height),
+        min=0.0,
+        max=1.0,
+    )
+    # Smoothstep avoids an abrupt reward discontinuity at the mode boundary.
+    return gate * gate * (3.0 - 2.0 * gate)
+
+
+def terrain_gated_flat_leg_posture(
+    env: "ManagerBasedRLEnv",
+    terrain_sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+    low_height: float = 0.025,
+    high_height: float = 0.08,
+    forward_start_index: int = 2,
+) -> torch.Tensor:
+    """Penalize leg motion only while upcoming terrain is flat.
+
+    With the four leg joints held near their default posture, velocity
+    tracking must be achieved by the two wheel velocity actions.
+    """
+    rough_gate = terrain_roughness_gate(
+        env,
+        terrain_sensor_cfg,
+        low_height=low_height,
+        high_height=high_height,
+        forward_start_index=forward_start_index,
+    )
+    return (1.0 - rough_gate) * default_joint_l2(env, asset_cfg)
+
+
+def terrain_gated_feet_air_time_positive_biped(
+    env: "ManagerBasedRLEnv",
+    command_name: str,
+    threshold: float,
+    sensor_cfg: SceneEntityCfg,
+    terrain_sensor_cfg: SceneEntityCfg,
+    low_height: float = 0.025,
+    high_height: float = 0.08,
+    forward_start_index: int = 2,
+) -> torch.Tensor:
+    """Reward one-wheel-at-a-time stepping only near uneven terrain."""
+    rough_gate = terrain_roughness_gate(
+        env,
+        terrain_sensor_cfg,
+        low_height=low_height,
+        high_height=high_height,
+        forward_start_index=forward_start_index,
+    )
+    return rough_gate * feet_air_time_positive_biped(
+        env,
+        command_name=command_name,
+        threshold=threshold,
+        sensor_cfg=sensor_cfg,
+    )
+
+
+def terrain_gated_alternating_foot_height(
+    env: "ManagerBasedRLEnv",
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    terrain_sensor_cfg: SceneEntityCfg,
+    cycle_time: float,
+    target_clearance: float = 0.08,
+    clearance_margin: float = 0.03,
+    max_clearance: float = 0.22,
+    std: float = 0.05,
+    duty_cycle: float = 0.5,
+    low_height: float = 0.025,
+    high_height: float = 0.08,
+    forward_start_index: int = 2,
+) -> torch.Tensor:
+    """Reward terrain-adaptive alternating wheel-foot clearance.
+
+    Clearance is measured relative to the lower wheel-foot.  This remains
+    meaningful when one wheel is already standing on a higher stair.  The
+    requested swing clearance grows with the upcoming height change instead
+    of forcing the same leg lift on every terrain level.
+    """
+    if max_clearance < target_clearance:
+        raise ValueError(
+            f"max_clearance must be >= target_clearance, got "
+            f"{max_clearance} < {target_clearance}."
+        )
+    asset: Articulation = env.scene[asset_cfg.name]
+    terrain_sensor: RayCaster = env.scene[terrain_sensor_cfg.name]
+    terrain_profile = forward_height_profile(terrain_sensor.data.ray_hits_w)
+    terrain_height = torch.amax(
+        torch.abs(terrain_profile[:, forward_start_index:]), dim=1
+    )
+    rough_gate = terrain_roughness_gate(
+        env,
+        terrain_sensor_cfg,
+        low_height=low_height,
+        high_height=high_height,
+        forward_start_index=forward_start_index,
+    )
+    desired_contact = _biped_desired_contact(env, cycle_time, duty_cycle)
+    swing_clearance = torch.clamp(
+        terrain_height + clearance_margin,
+        min=target_clearance,
+        max=max_clearance,
+    )
+    desired_clearance = (1.0 - desired_contact) * swing_clearance.unsqueeze(1)
+    foot_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]
+    actual_clearance = foot_z - torch.amin(foot_z, dim=1, keepdim=True)
+    error = torch.mean(torch.square(actual_clearance - desired_clearance), dim=1)
+    reward = torch.exp(-error / max(std**2, 1.0e-8))
+    moving = torch.norm(env.command_manager.get_command(command_name)[:, :3], dim=1) > 0.1
+    return rough_gate * reward * moving.float()
+
+
+def terrain_gated_swing_contact(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+    terrain_sensor_cfg: SceneEntityCfg,
+    cycle_time: float,
+    sigma: float = 25.0,
+    duty_cycle: float = 0.5,
+    low_height: float = 0.025,
+    high_height: float = 0.08,
+    forward_start_index: int = 2,
+) -> torch.Tensor:
+    """Penalize contact of the wheel-foot that should be swinging."""
+    rough_gate = terrain_roughness_gate(
+        env,
+        terrain_sensor_cfg,
+        low_height=low_height,
+        high_height=high_height,
+        forward_start_index=forward_start_index,
+    )
+    return rough_gate * tracking_contacts_shaped_force(
+        env,
+        sensor_cfg=sensor_cfg,
+        cycle_time=cycle_time,
+        sigma=sigma,
+        duty_cycle=duty_cycle,
+    )
+
+
+def both_feet_airborne(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Return one when both wheel-feet are airborne, discouraging jumping."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    in_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0
+    return torch.all(~in_contact, dim=1).float()
+
+
+def feet_too_close(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg,
+    min_distance: float = 0.115,
+) -> torch.Tensor:
+    """Penalise the two feet getting closer than ``min_distance`` in XY.
+
+    Mirrors ``BipedPF._reward_feet_distance`` (weight=-100).
+    Returns clip(min_distance - actual_distance, 0, 1) — use with NEGATIVE weight.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    foot_pos = asset.data.body_pos_w[:, asset_cfg.body_ids, :2]    # (B, 2, 2)
+    dist = torch.norm(foot_pos[:, 0, :] - foot_pos[:, 1, :], dim=-1)  # (B,)
+    return torch.clamp(min_distance - dist, min=0.0, max=1.0)
+
+
+def feet_regulation(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg,
+    h_ref: float = 0.05,
+) -> torch.Tensor:
+    """Penalise foot sliding: exponential weight based on height above ground.
+
+    Mirrors ``BipedPF._reward_feet_regulation``.
+    reward = Σ exp(-z/h_ref) * |v_xy|²  — use with NEGATIVE weight.
+    Large when foot is near ground AND moving horizontally (sliding).
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    foot_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]        # (B, 2)
+    foot_vel_xy = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2]  # (B, 2, 2)
+    foot_vel_xy_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)       # (B, 2)
+    reward = torch.sum(torch.exp(-foot_z / h_ref) * foot_vel_xy_sq, dim=1)
+    return reward
+
+
+def foot_landing_vel(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+    height_threshold: float = 0.08,
+) -> torch.Tensor:
+    """Penalise high downward velocity just before the foot lands.
+
+    Mirrors ``BipedPF._reward_foot_landing_vel`` (weight=-0.15).
+    Fires when foot is below ``height_threshold``, not in contact, and moving down.
+    Use with NEGATIVE weight.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+
+    foot_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]            # (B, 2)
+    foot_z_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, 2]    # (B, 2)
+    in_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0  # (B, 2)
+
+    about_to_land = (foot_z < height_threshold) & (~in_contact) & (foot_z_vel < 0.0)
+    landing_vel = torch.where(about_to_land, foot_z_vel, torch.zeros_like(foot_z_vel))
+    return torch.sum(torch.square(landing_vel), dim=1)
+
+
+def action_smooth(env: "ManagerBasedRLEnv") -> torch.Tensor:
+    """Second-order action smoothness penalty.
+
+    Mirrors ``BipedPF._reward_action_smooth`` (weight=-0.01).
+    Penalises |a_t - 2*a_{t-1} + a_{t-2}|² (discrete 2nd derivative).
+    Falls back to 1st-order if prev_prev_action is unavailable.
+    """
+    a = env.action_manager.action
+    a1 = env.action_manager.prev_action
+    if hasattr(env.action_manager, "prev_prev_action"):
+        a2 = env.action_manager.prev_prev_action
+        return torch.sum(torch.square(a - 2.0 * a1 + a2), dim=1)
+    return torch.sum(torch.square(a - a1), dim=1)
+
+
+# ---------------------------------------------------------------------------
+# Fall-recovery helpers — provide non-zero gradient when fully inverted
+# ---------------------------------------------------------------------------
+
+def upright_progress(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str | None = None,
+) -> torch.Tensor:
+    """Linear self-righting gradient: returns -g_z in [-1, +1].
+
+    Unlike ``upward`` = (1-g_z)² which has **zero value and zero gradient**
+    when the robot is fully inverted (g_z = +1), this function has a constant
+    gradient of -1 everywhere, including at full inversion.
+
+    Value map:
+        upright  (g_z ≈ -1) → +1   (reward)
+        on side  (g_z ≈  0) →  0
+        inverted (g_z ≈ +1) → -1   (penalty that pushes toward righting)
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    reward = -asset.data.projected_gravity_b[:, 2]
+    term = _jump_term(env, command_name)
+    if term is not None:
+        standing = (term.jump_stage == term.STAGE_RECOVERY) | (term.jump_stage == term.STAGE_LAND)
+        reward *= standing.float()
+    return reward
+
+
+def inverted_ang_vel_bonus(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """Reward base angular velocity proportional to how inverted the robot is.
+
+    When fully inverted (g_z = +1) the weight is 1.0; when upright (g_z = -1)
+    the weight is 0.0.  This encourages aggressive rolling/thrashing to escape
+    the fully-inverted dead zone where all other rewards vanish.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    g_z = asset.data.projected_gravity_b[:, 2]
+    inverted_weight = torch.clamp(g_z, 0.0, 1.0)  # 0 upright → 1 fully inverted
+    ang_vel_magnitude = torch.norm(asset.data.root_ang_vel_b, dim=1)
+    return inverted_weight * ang_vel_magnitude
+
+
+def inverted_leg_swing_momentum(
+    env: ManagerBasedRLEnv,
+    momentum_scale: float,
+    contact_force_threshold: float,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Reward leg-swing angular momentum only while the inverted base touches ground.
+
+    The momentum is computed from every selected leg body's motion relative to
+    the base COM.  Therefore translating or rotating the whole robot cannot
+    earn this reward by itself; the policy must swing the legs relative to the
+    body.  The roll/pitch component is bounded to ``[0, 1]`` with ``tanh``.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+
+    leg_pos = asset.data.body_com_pos_w[:, asset_cfg.body_ids, :]
+    leg_vel = asset.data.body_com_lin_vel_w[:, asset_cfg.body_ids, :]
+    base_pos = asset.data.root_com_pos_w[:, None, :]
+    base_vel = asset.data.root_com_lin_vel_w[:, None, :]
+    masses = asset.data.default_mass[:, asset_cfg.body_ids, None].to(
+        device=leg_vel.device, dtype=leg_vel.dtype
+    )
+
+    relative_pos = leg_pos - base_pos
+    relative_momentum = masses * (leg_vel - base_vel)
+    angular_momentum = torch.cross(relative_pos, relative_momentum, dim=-1).sum(dim=1)
+    roll_pitch_momentum = torch.norm(angular_momentum[:, :2], dim=1)
+    swing_reward = torch.tanh(roll_pitch_momentum / max(momentum_scale, 1.0e-6))
+
+    base_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    peak_base_force = torch.max(torch.norm(base_forces, dim=-1), dim=1)[0]
+    base_in_contact = torch.any(peak_base_force > contact_force_threshold, dim=1)
+    inverted_weight = torch.clamp(asset.data.projected_gravity_b[:, 2], 0.0, 1.0)
+    return swing_reward * inverted_weight * base_in_contact.float()
+
+
+def undesired_contacts_raw(
+    env: ManagerBasedRLEnv, threshold: float, sensor_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """Contact penalty with **no** uprightness filter.
+
+    ``undesired_contacts`` multiplies by ``clamp(-g_z, 0, 0.7)/0.7`` which
+    zeroes out the penalty when the robot is fully inverted.  This variant
+    omits that mask so base-contact is always penalised regardless of
+    orientation — essential for recovery training.
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    net_contact_forces = contact_sensor.data.net_forces_w_history
+    is_contact = (
+        torch.max(torch.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1), dim=1)[0] > threshold
+    )
+    return torch.sum(is_contact, dim=1).float()
+
+
+# ---------------------------------------------------------------------------
+# Jump phase rewards — stage-gated by foot contact state
+# ---------------------------------------------------------------------------
+# Contact gating convention (all functions):
+#   on_ground = any(current_contact_time[:, feet] > 0)
+#   in_air    = all(current_contact_time[:, feet] == 0)
+# ---------------------------------------------------------------------------
+
+
+def _jump_term(env: ManagerBasedRLEnv, command_name: str | None):
+    if command_name is None:
+        return None
+    if command_name not in env.command_manager.active_terms:
+        return None
+    return env.command_manager.get_term(command_name)
+
+
+def _height_above_terrain(
+    env: ManagerBasedRLEnv,
+    asset: RigidObject,
+    terrain_sensor_cfg: SceneEntityCfg | None,
+) -> torch.Tensor:
+    """Return root height relative to terrain, or world height without a scanner."""
+    if terrain_sensor_cfg is None:
+        return asset.data.root_pos_w[:, 2]
+
+    sensor: RayCaster = env.scene[terrain_sensor_cfg.name]
+    ray_heights = sensor.data.ray_hits_w[..., 2]
+    finite = torch.isfinite(ray_heights)
+    safe_heights = torch.where(finite, ray_heights, torch.zeros_like(ray_heights))
+    valid_count = torch.clamp(torch.sum(finite, dim=1), min=1)
+    terrain_height = torch.sum(safe_heights, dim=1) / valid_count
+    relative_height = asset.data.root_pos_w[:, 2] - terrain_height
+    # Preserve the flat-task behavior if a ray caster temporarily has no hit.
+    has_valid_hit = torch.any(finite, dim=1)
+    return torch.where(has_valid_hit, relative_height, asset.data.root_pos_w[:, 2])
+
+
+def jump_before_setting(
+    env: ManagerBasedRLEnv,
+    crouch_height: float = 0.25,
+    sigma: float = 0.04,
+    command_name: str | None = None,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    terrain_sensor_cfg: SceneEntityCfg | None = None,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Stage 0 — reward crouching/蓄力 pose when on ground.
+
+    Gaussian bell centred at crouch_height (below normal standing ≈ 0.35 m).
+    Returns exp(-((h - crouch_height)^2) / (2*sigma^2)) ∈ (0, 1] when on ground.
+    Use with positive weight to incentivise lowering the COM before takeoff.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    on_ground = torch.any(
+        contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0, dim=1
+    )
+    height = _height_above_terrain(env, asset, terrain_sensor_cfg)
+    reward = torch.exp(-((height - crouch_height) ** 2) / (2.0 * sigma ** 2))
+    term = _jump_term(env, command_name)
+    if term is not None:
+        prep_mask = term.jump_stage == term.STAGE_PREP
+        return prep_mask.float() * on_ground.float() * reward
+    return on_ground.float() * reward
+
+
+def lin_vel_z_jump(
+    env: ManagerBasedRLEnv,
+    max_vel: float = 10.0,
+    require_in_air: bool = True,
+    command_name: str | None = None,
+    forward_velocity_target: float | None = None,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Stage 1 — reward upward world-z velocity.
+
+    When require_in_air=True (default): fires only when all feet are off the ground.
+    When require_in_air=False: fires always — use during early jump training to
+    provide a non-zero gradient toward takeoff even from ground contact.
+    Returns clamp(vel_z_world, 0, max_vel).
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    vel_z = asset.data.root_lin_vel_w[:, 2]
+    reward = torch.clamp(vel_z, 0.0, max_vel)
+    if forward_velocity_target is not None:
+        # Stairs are aligned with world +X.  Coupling vertical velocity to
+        # forward velocity prevents an in-place hop from collecting take-off
+        # reward.  Flat jump tasks keep the original behavior with None.
+        forward_gate = torch.clamp(
+            asset.data.root_lin_vel_w[:, 0] / max(forward_velocity_target, 1.0e-6),
+            0.0,
+            1.0,
+        )
+        reward *= forward_gate
+    term = _jump_term(env, command_name)
+    if term is not None:
+        active_jump = (term.jump_stage == term.STAGE_TAKEOFF) | (term.jump_stage == term.STAGE_FLIGHT)
+        return reward * active_jump.float()
+    if require_in_air:
+        contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+        in_air = torch.all(
+            contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] == 0.0, dim=1
+        )
+        reward = reward * in_air.float()
+    return reward
+
+
+def jump_flight_height(
+    env: ManagerBasedRLEnv,
+    base_height: float = 0.35,
+    command_name: str | None = None,
+    target_height: float | None = None,
+    min_height: float = 0.42,
+    forward_target_distance: float | None = None,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    terrain_sensor_cfg: SceneEntityCfg | None = None,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Stage 2 — reward COM height above base_height during flight.
+
+    Returns max(h - base_height, 0) when all feet are off the ground.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    height = _height_above_terrain(env, asset, terrain_sensor_cfg)
+    term = _jump_term(env, command_name)
+    if term is not None:
+        target = target_height if target_height is not None else term.cfg.target_height
+        window_steps = int(term.cfg.flight_reward_window_s / env.step_dt)
+        in_reward_window = (term.jump_stage == term.STAGE_FLIGHT) & (term.flight_reward_timer <= window_steps)
+        above_takeoff = height > min_height
+        height_progress = torch.clamp(
+            (height - base_height) / max(target - base_height, 1.0e-6),
+            0.0,
+            1.0,
+        )
+        target_bonus = torch.exp(-torch.abs(height - target) * 5.0)
+        reward = 12.0 * height_progress + 4.0 * target_bonus
+        if forward_target_distance is not None and hasattr(term, "takeoff_pos_w"):
+            forward_distance = asset.data.root_pos_w[:, 0] - term.takeoff_pos_w[:, 0]
+            forward_gate = torch.clamp(
+                forward_distance / max(forward_target_distance, 1.0e-6),
+                0.0,
+                1.0,
+            )
+            reward *= forward_gate
+        return in_reward_window.float() * above_takeoff.float() * reward
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    in_air = torch.all(
+        contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] == 0.0, dim=1
+    )
+    return in_air.float() * torch.clamp(height - base_height, 0.0, None)
+
+
+def jump_forward_progress(
+    env: ManagerBasedRLEnv,
+    target_distance: float = 0.45,
+    command_name: str | None = None,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward forward displacement during a commanded jump.
+
+    The Mini stairs terrain is aligned with world ``+X`` and one tread is
+    0.40 m wide.  Normalizing at 0.45 m therefore asks the robot to clear one
+    complete tread instead of collecting the vertical jump rewards in place.
+    The term is active only in FLIGHT/LAND and is bounded to ``[0, 1]``.
+    """
+    term = _jump_term(env, command_name)
+    if term is None or not hasattr(term, "takeoff_pos_w"):
+        return torch.zeros(env.num_envs, device=env.device)
+
+    asset: RigidObject = env.scene[asset_cfg.name]
+    forward_distance = asset.data.root_pos_w[:, 0] - term.takeoff_pos_w[:, 0]
+    progress = torch.clamp(forward_distance / max(target_distance, 1.0e-6), 0.0, 1.0)
+    active = (term.jump_stage == term.STAGE_FLIGHT) | (term.jump_stage == term.STAGE_LAND)
+    return progress * active.float()
+
+
+def jump_land_stability(
+    env: ManagerBasedRLEnv,
+    command_name: str | None = None,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Stage 3 — return angular velocity magnitude when on ground. Use with NEGATIVE weight.
+
+    Penalises tumbling on landing. Fires when at least one foot is in contact.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    on_ground = torch.any(
+        contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0, dim=1
+    )
+    ang_vel_mag = torch.norm(asset.data.root_ang_vel_b, dim=1)
+    term = _jump_term(env, command_name)
+    if term is not None:
+        return (
+            torch.exp(-torch.sum(torch.square(asset.data.root_ang_vel_b[:, :2]), dim=1))
+            * (term.jump_stage == term.STAGE_LAND).float()
+            * on_ground.float()
+        )
+    return on_ground.float() * ang_vel_mag
+
+
+def jump_land_orientation(
+    env: ManagerBasedRLEnv,
+    command_name: str | None = None,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Stage 3 — reward upright orientation (1-g_z)^2 when on ground.
+
+    Use with positive weight to reinforce landing upright. Fires when at least
+    one foot is in contact.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    on_ground = torch.any(
+        contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0, dim=1
+    )
+    term = _jump_term(env, command_name)
+    if term is not None:
+        return (
+            torch.exp(-torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1))
+            * (term.jump_stage == term.STAGE_LAND).float()
+            * on_ground.float()
+        )
+    reward = torch.square(1.0 - asset.data.projected_gravity_b[:, 2])
+    return on_ground.float() * reward
+def wheel_scrub_penalty(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str,
+    command_threshold: float = 0.10,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalise wheel scrubbing during lateral / rotational commands.
+
+    Scrubbing occurs when a foot is on the ground and moving sideways —
+    the typical outcome of tank-style differential steering.  Penalising
+    ``contact_weight × foot_lateral_speed`` pushes the policy toward
+    lifting and re-planting legs instead.
+
+    Physics basis: scrub_power ∝ F_normal · v_lateral (Coulomb friction loss).
+    Reference: Bjelonic et al. "Keep Rollin'" RA-L/ICRA 2019.
+    Recommended weight: -0.5 ~ -2.0
+    """
+    sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    # contact force magnitude as proxy for normal force.
+    # norm() ≈ F_normal × sqrt(1+μ²), the constant factor is absorbed by the 50N normalization.
+    # More robust than z-component alone on non-flat terrain (slopes reduce z projection).
+    contact_force = sensor.data.net_forces_w[:, sensor_cfg.body_ids, :].norm(dim=-1)  # (B, K)
+    contact_w = torch.clamp(contact_force / 50.0, 0.0, 1.0)
+
+    # foot velocity projected onto robot body-frame y-axis (true lateral direction).
+    # This avoids penalising forward wheel rolling (body-x) which is desirable.
+    foot_vel_w = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :]  # (B, K, 3)
+    B, K = foot_vel_w.shape[:2]
+    root_quat = asset.data.root_quat_w  # (B, 4)
+    root_quat_exp = root_quat.unsqueeze(1).expand(-1, K, -1).reshape(B * K, 4)
+    foot_vel_body = quat_apply_inverse(root_quat_exp, foot_vel_w.reshape(B * K, 3)).reshape(B, K, 3)
+    foot_lateral_speed = foot_vel_body[:, :, 1].abs()  # body-y = sideways  (B, K)
+
+    # gate: only penalise when vy or wz command is active
+    cmd = env.command_manager.get_command(command_name)
+    lateral_or_rot = torch.norm(cmd[:, 1:3], dim=1)
+    cmd_gate = torch.clamp(lateral_or_rot / command_threshold, 0.0, 1.0).unsqueeze(-1)  # (B, 1)
+
+    scrub = contact_w * foot_lateral_speed * cmd_gate  # (B, K)
+    return scrub.sum(dim=-1) * torch.clamp(-asset.data.projected_gravity_b[:, 2], 0.0, 0.7) / 0.7
+
+
+def foot_clearance(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str,
+    target_height: float = 0.08,
+    std: float = 0.04,
+    wheel_radius: float = 0.09,
+    command_threshold: float = 0.10,
+    max_air_time: float = 0.4,
+    min_contact: int = 2,
+    lift_penalty_scale: float = 1.0,
+    terrain_sensor_cfg: SceneEntityCfg | None = None,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward foot-lift height during lin_y/ang_z, penalise it during lin_x-only/standing.
+
+    Signed two-state gate on ``lateral_or_rot = norm(cmd[:, 1:3])`` (same
+    quantity ``hip_pos``/``wheel_scrub_penalty`` gate on):
+
+    - **active** (``lateral_or_rot > command_threshold``, i.e. lin_y or
+      ang_z commanded): airborne feet are rewarded for reaching
+      ``target_height`` via the exponential kernel
+      ``exp(-below²/std²)``, ``below = clamp(target_height - clearance, 0)``,
+      ``clearance = foot_pos_z - terrain_z - wheel_radius``.
+    - **inactive** (zero command *or* pure lin_x — both collapse to
+      ``lateral_or_rot`` being quiet): any positive clearance above the
+      wheel radius is *penalised* as ``-lift_penalty_scale * clearance_clamped²``,
+      discouraging stepping when the robot should just be rolling on its
+      wheels or standing still.
+
+    ``terrain_sensor_cfg``: optional RayCaster sensor (e.g. ``height_scanner``).
+    If provided, terrain_z = mean(ray_hits_w[..., 2]) — same approach as
+    ``base_height_l2``.  If None, terrain_z = 0 (flat terrain assumption).
+
+    ``max_air_time`` guards against the degenerate "park 2 legs in the air
+    forever" solution: a foot's *reward* contribution (active state only) is
+    scaled by ``exp(-(current_air_time / max_air_time)²)``, so reward decays
+    smoothly once a foot has been airborne noticeably longer than one
+    expected swing phase — a foot that never comes back down stops
+    collecting reward instead of being a free, permanent source of it.
+    Combined with ``min_contact`` (at least this many other feet must stay
+    grounded), this prevents the previously observed "two legs permanently
+    airborne" failure mode. The inactive-state penalty is NOT decayed by
+    air time — the longer a foot hovers when it shouldn't, the worse.
+
+    Recommended weight: +0.5 ~ +2.0
+    """
+    sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    in_contact = sensor.data.net_forces_w[:, sensor_cfg.body_ids, :].norm(dim=-1) > 1.0  # (B, K)
+    in_air = ~in_contact
+
+    foot_pos_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]  # (B, K)
+
+    # terrain reference height — mirrors base_height_l2's sensor approach
+    if terrain_sensor_cfg is not None and terrain_sensor_cfg.name in env.scene.sensors:
+        terrain_sensor: RayCaster = env.scene[terrain_sensor_cfg.name]
+        ray_hits_z = terrain_sensor.data.ray_hits_w[..., 2]  # (B, n_rays)
+        terrain_z = torch.mean(ray_hits_z, dim=1, keepdim=True)  # (B, 1) broadcast to (B, K)
+    else:
+        terrain_z = torch.zeros_like(foot_pos_z)  # flat ground or no sensor
+
+    clearance = foot_pos_z - terrain_z - wheel_radius  # (B, K)
+
+    # signed gate: +1 → reward stepping (lin_y/ang_z active), -1 → penalise
+    # stepping (zero command or pure lin_x — anything with lateral_or_rot quiet)
+    cmd = env.command_manager.get_command(command_name)
+    lateral_or_rot = torch.norm(cmd[:, 1:3], dim=1)
+    active = (lateral_or_rot > command_threshold).unsqueeze(-1)  # (B, 1)
+
+    # -- active-state term: exponential kernel on clearance deficit, decayed by air time
+    below = torch.clamp(target_height - clearance, min=0.0)
+    height_reward = torch.exp(-below.pow(2) / std**2)
+    air_time = sensor.data.current_air_time[:, sensor_cfg.body_ids]  # (B, K)
+    swing_decay = torch.exp(-(air_time / max_air_time).pow(2))
+    num_contact = in_contact.float().sum(dim=-1, keepdim=True)  # (B, 1)
+    has_other_contact = (num_contact >= min_contact).float()  # (B, 1)
+    active_term = height_reward * swing_decay * has_other_contact
+
+    # -- inactive-state term: penalise any lift above the wheel radius, undecayed
+    inactive_term = -lift_penalty_scale * torch.clamp(clearance, min=0.0).pow(2)
+
+    reward = in_air.float() * torch.where(active, active_term, inactive_term)  # (B, K)
+
+    return reward.sum(dim=-1) * torch.clamp(-asset.data.projected_gravity_b[:, 2], 0.0, 0.7) / 0.7
+
+
+def wheel_roll_reward(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str,
+    command_threshold: float = 0.15,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward grounded feet with forward velocity whenever lin_x is active.
+
+    Gate: only requires vx > threshold (no lat_inactive condition).
+    This creates a constant incentive to keep feet on the ground and roll
+    forward, which the policy will override only when scrubbing forces it to lift.
+    Recommended weight: +0.5 ~ +2.0
+    """
+    sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    in_contact = sensor.data.net_forces_w[:, sensor_cfg.body_ids, :].norm(dim=-1) > 1.0  # (B, K)
+    foot_vel_x = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, 0].abs()  # (B, K)
+
+    cmd = env.command_manager.get_command(command_name)
+    fwd_active = (torch.abs(cmd[:, 0]) > command_threshold).float().unsqueeze(-1)  # (B, 1)
+
+    return (in_contact.float() * foot_vel_x * fwd_active).sum(dim=-1)
+
+
+def feet_air_time_wheeled(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str,
+    threshold: float = 0.3,
+    command_threshold: float = 0.15,
+) -> torch.Tensor:
+    """Reward long swing steps during lateral/rotational commands (wheel-legged variant).
+
+    Mirrors ``feet_air_time`` logic: reward = (last_air_time - threshold) × first_contact.
+    Gate: only active when lin_y or ang_z command exceeds ``command_threshold``.
+    Recommended weight: +1.0 ~ +2.0
+    """
+    sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+
+    first_contact = sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
+    last_air_time = sensor.data.last_air_time[:, sensor_cfg.body_ids]
+
+    cmd = env.command_manager.get_command(command_name)
+    lateral_or_rot = torch.norm(cmd[:, 1:3], dim=1)
+    cmd_gate = (lateral_or_rot > command_threshold).float()
+
+    reward = torch.sum((last_air_time - threshold) * first_contact, dim=1)
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward * cmd_gate
+
+
+def no_step_forward(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str,
+    command_threshold: float = 0.15,
+) -> torch.Tensor:
+    """Penalise feet in the air during pure forward (lin_x) motion.
+
+    Gate: lin_x active AND norm(vy, wz) quiet.
+    Pairs with ``gait_trot`` (lateral_only): the two rewards together teach
+    - wheel rolling during lin_x  (no_step_forward penalises stepping)
+    - stepping gait during lin_y/ang_z (gait_trot rewards trot)
+    Recommended weight: -1.0 ~ -3.0
+    """
+    sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+
+    in_contact = sensor.data.net_forces_w[:, sensor_cfg.body_ids, :].norm(dim=-1) > 1.0  # (B, K)
+    in_air = ~in_contact  # (B, K)
+
+    cmd = env.command_manager.get_command(command_name)
+    fwd_active = torch.abs(cmd[:, 0]) > command_threshold
+    lat_quiet = torch.norm(cmd[:, 1:3], dim=1) < command_threshold
+    pure_fwd = (fwd_active & lat_quiet).float()  # (B,)
+
+    # penalise number of airborne feet during pure forward motion
+    return in_air.float().sum(dim=-1) * pure_fwd
+
+
+def hip_zero_on_contact(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    hip_asset_cfg: SceneEntityCfg,
+    tolerance: float = 0.05,
+) -> torch.Tensor:
+    """Dead-band hip constraint active only when the foot is in contact.
+
+    During swing phase the hip is free to move for repositioning.
+    Once the foot touches down the hip must return to 0 to prevent lateral
+    ground forces and scrubbing.
+
+    ``sensor_cfg.body_ids`` and ``hip_asset_cfg.joint_ids`` must share the
+    same leg order (FL → FR → RL → RR).
+    Recommended weight: -3.0 ~ -10.0
+    """
+    sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[hip_asset_cfg.name]
+
+    in_contact = sensor.data.net_forces_w[:, sensor_cfg.body_ids, :].norm(dim=-1) > 1.0  # (B, K)
+    hip_pos = asset.data.joint_pos[:, hip_asset_cfg.joint_ids]  # (B, K)
+    excess = torch.clamp(hip_pos.abs() - tolerance, min=0.0)
+    return (in_contact.float() * excess.pow(2)).sum(dim=-1)
+
+
+def hip_pos(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str = "base_velocity",
+    command_threshold: float = 0.1,
+    tolerance: float = 0.05,
+    loose_ratio: float = 0.2,
+) -> torch.Tensor:
+    """Hip constraint with two penalty levels based on command direction.
+
+    - lat_quiet (standing / pure lin_x): full penalty × 1.0
+    - lat_active (lin_y / ang_z stepping): reduced penalty × ``loose_ratio``
+
+    ``loose_ratio=0`` → no penalty during stepping (original behaviour).
+    ``loose_ratio=0.2`` → 20% penalty during stepping, 100% when still/lin_x.
+
+    Recommended weight: -5.0 ~ -20.0
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    hip_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]  # (B, K)
+
+    cmd = env.command_manager.get_command(command_name)
+    lat_quiet = (torch.norm(cmd[:, 1:3], dim=1) < command_threshold).float()  # (B,) 0 or 1
+
+    # smooth blend: 1.0 when quiet, loose_ratio when lateral/rot active
+    scale = lat_quiet + loose_ratio * (1.0 - lat_quiet)  # (B,)
+
+    excess = torch.clamp(hip_pos.abs() - tolerance, min=0.0)  # (B, K)
+    reward = excess.pow(2).sum(dim=-1) * scale
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+class PositionHoldAtRest(ManagerTermBase):
+    """Penalise xy displacement from the position saved when cmd last became zero.
+
+    When the command magnitude transitions to zero (or just after reset),
+    the robot's current xy world position is saved.  While cmd remains zero,
+    any deviation from that saved position is penalised as ``||Δpos||²``.
+
+    Recommended weight: -5.0 ~ -20.0
+    """
+
+    def __init__(self, cfg: RewTerm, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self._target_xy = torch.zeros(env.num_envs, 2, device=env.device)
+        self._initialized = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        self._prev_zero = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        command_name: str,
+        command_threshold: float = 0.1,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ) -> torch.Tensor:
+        asset: Articulation = env.scene[asset_cfg.name]
+        cmd = torch.norm(env.command_manager.get_command(command_name), dim=1)
+        cmd_zero = cmd < command_threshold  # (B,) bool
+
+        # After episode reset (episode_length_buf == 1), clear saved position
+        just_reset = env.episode_length_buf == 1
+        self._initialized[just_reset] = False
+
+        # Save position when: just transitioned to zero, or not yet initialised
+        save = cmd_zero & (~self._prev_zero | ~self._initialized)
+        if save.any():
+            self._target_xy[save] = asset.data.root_pos_w[save, :2]
+            self._initialized[save] = True
+
+        self._prev_zero = cmd_zero.clone()
+
+        # Penalise xy drift from saved position while cmd is zero
+        active = cmd_zero & self._initialized
+        pos_error = (asset.data.root_pos_w[:, :2] - self._target_xy).norm(dim=-1)
+        return pos_error.pow(2) * active.float() * torch.clamp(-asset.data.projected_gravity_b[:, 2], 0.0, 0.7) / 0.7
+
+
+def hip_mirror(
+    env: ManagerBasedRLEnv,
+    left_asset_cfg: SceneEntityCfg,
+    right_asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalise left-right hip asymmetry: enforce q_left + q_right ≈ 0.
+
+    For a wheel-legged robot, the hip joints on the left and right sides should
+    be mirror images (opposite signs) when viewed from above:
+        FL_hip ≈ -FR_hip,  RL_hip ≈ -RR_hip
+
+    Penalising ``(q_left + q_right)²`` pushes both directions of rotation to
+    produce the same *magnitude* of hip angle, removing the asymmetry where
+    one rotation direction produces large hip deviations and the other does not.
+
+    Recommended weight: -0.5 ~ -2.0
+    """
+    asset: Articulation = env.scene[left_asset_cfg.name]
+    q_left = asset.data.joint_pos[:, left_asset_cfg.joint_ids]  # (B, K_L)
+    q_right = asset.data.joint_pos[:, right_asset_cfg.joint_ids]  # (B, K_R)
+    # symmetric ↔ sum ≈ 0
+    return (q_left + q_right).pow(2).sum(dim=-1)
+
+
+# ------------------------------------------------------------------
+# D1H-specific reward functions
+# ------------------------------------------------------------------
+
+
+def keep_upright_only_reward(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, upright_gz_threshold: float, time_coeff: float
+) -> torch.Tensor:
+    asset: RigidObject = env.scene[asset_cfg.name]
+    g_z = asset.data.projected_gravity_b[:, 2]
+
+    if not hasattr(env, "upright_timer_buf") or env.upright_timer_buf is None:
+        env.upright_timer_buf = torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+    fully_upright_mask = (g_z <= upright_gz_threshold).float()
+
+    env.upright_timer_buf = torch.where(
+        fully_upright_mask > 0.5, env.upright_timer_buf + env.step_dt, torch.zeros_like(env.upright_timer_buf)
+    )
+
+    base_score = fully_upright_mask * 1.0
+    time_bonus = fully_upright_mask * env.upright_timer_buf * time_coeff
+    total_reward = base_score + time_bonus
+
+    return total_reward
+
+
+def reward_feet_air_time(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces", body_names=[".*_foot"]),
+    command_name: str = "base_velocity",
+    min_air_t: float = 0.5,
+    force_threshold: float = 1.0,
+) -> torch.Tensor:
+    contact_sensor = env.scene[sensor_cfg.name]
+    contact = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2] > force_threshold
+    air_time = contact_sensor.data.air_time[:, sensor_cfg.body_ids]
+
+    landed = contact & (air_time > min_air_t)
+    rew_airTime = torch.sum(landed.float(), dim=-1)
+
+    cmd = env.command_manager.get_command(command_name)
+    moving_mask = torch.norm(cmd[:, :2], dim=1) > 0.1
+    rew_airTime *= moving_mask
+
+    return rew_airTime
+
+
+def reward_collision_head(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces", body_names=["base_link"]),
+    threshold: float = 10.0,
+) -> torch.Tensor:
+    contact_sensor = env.scene[sensor_cfg.name]
+    forces = torch.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :], dim=-1)
+    return torch.sum((forces > threshold).float(), dim=-1)
+
+
+def reward_dof_thigh_vel(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", joint_names=[".*_thigh_joint"])
+) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    return torch.sum(torch.square(asset.data.joint_vel[:, asset_cfg.joint_ids]), dim=-1)
+
+
+def reward_body_pos_to_feet_x(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, sigma: float) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    foot_body_names = ["FL_foot", "FR_foot"]
+    foot_ids = [asset.body_names.index(name) for name in foot_body_names]
+
+    feet_pos_w = asset.data.body_pos_w[:, foot_ids, :]
+    base_pos_w = asset.data.root_pos_w.unsqueeze(1)
+    base_quat_w = asset.data.root_quat_w
+
+    rel_w = feet_pos_w - base_pos_w
+    n_envs, n_feet = rel_w.shape[:2]
+    base_quat_w_expanded = base_quat_w.unsqueeze(1).expand(-1, n_feet, -1).reshape(-1, 4)
+    rel_w_flat = rel_w.reshape(-1, 3)
+    rel_b = quat_apply_inverse(base_quat_w_expanded, rel_w_flat).reshape(n_envs, n_feet, 3)
+
+    x_mean_abs = torch.abs(torch.mean(rel_b[:, :, 0], dim=1))
+    reward = torch.exp(-x_mean_abs / sigma)
+    return reward
+
+
+def reward_body_feet_distance_x(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, sigma: float) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    foot_body_names = ["FL_foot", "FR_foot"]
+    foot_ids = [asset.body_names.index(name) for name in foot_body_names]
+
+    feet_pos_w = asset.data.body_pos_w[:, foot_ids, :]
+    base_quat_w = asset.data.root_quat_w
+
+    foot_diff_w = feet_pos_w[:, 0, :] - feet_pos_w[:, 1, :]
+    foot_diff_b = quat_apply_inverse(base_quat_w, foot_diff_w)
+
+    x_err = torch.abs(foot_diff_b[:, 0]) / sigma
+    reward = torch.square(x_err)
+    return reward
+
+
+def reward_body_feet_distance_y(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, sigma: float, desired_feet_distance: float
+) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    foot_body_names = ["FL_foot", "FR_foot"]
+    foot_ids = [asset.body_names.index(name) for name in foot_body_names]
+
+    feet_pos_w = asset.data.body_pos_w[:, foot_ids, :]
+    base_quat_w = asset.data.root_quat_w
+
+    foot_diff_w = feet_pos_w[:, 0, :] - feet_pos_w[:, 1, :]
+    foot_diff_b = quat_apply_inverse(base_quat_w, foot_diff_w)
+
+    y_abs = torch.abs(foot_diff_b[:, 1])
+    y_err = torch.abs(y_abs - desired_feet_distance) / sigma
+    reward = torch.square(y_err)
+    return reward
+
+
+def reward_body_symmetry_y(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, sigma: float) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    foot_body_names = ["FL_foot", "FR_foot"]
+    foot_ids = [asset.body_names.index(name) for name in foot_body_names]
+
+    feet_pos_w = asset.data.body_pos_w[:, foot_ids, :]
+    base_pos_w = asset.data.root_pos_w.unsqueeze(1)
+    base_quat_w = asset.data.root_quat_w
+
+    rel_w = feet_pos_w - base_pos_w
+    rel_b_0 = quat_apply_inverse(base_quat_w, rel_w[:, 0, :])
+    rel_b_1 = quat_apply_inverse(base_quat_w, rel_w[:, 1, :])
+
+    y1_abs = torch.abs(rel_b_0[:, 1])
+    y2_abs = torch.abs(rel_b_1[:, 1])
+    sym_err = torch.abs(y1_abs - y2_abs)
+
+    reward = torch.exp(-sym_err / sigma)
+    return reward
+
+
+def reward_body_symmetry_z(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, sigma: float) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    foot_body_names = ["FL_foot", "FR_foot"]
+    foot_ids = [asset.body_names.index(name) for name in foot_body_names]
+
+    feet_pos_w = asset.data.body_pos_w[:, foot_ids, :]
+    base_pos_w = asset.data.root_pos_w.unsqueeze(1)
+    base_quat_w = asset.data.root_quat_w
+
+    rel_w = feet_pos_w - base_pos_w
+    rel_b_0 = quat_apply_inverse(base_quat_w, rel_w[:, 0, :])
+    rel_b_1 = quat_apply_inverse(base_quat_w, rel_w[:, 1, :])
+
+    z1_abs = torch.abs(rel_b_0[:, 2])
+    z2_abs = torch.abs(rel_b_1[:, 2])
+    sym_err = torch.abs(z1_abs - z2_abs)
+
+    reward = torch.exp(-sym_err / sigma)
+    return reward

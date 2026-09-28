@@ -240,6 +240,10 @@ void FSMState_RL::update_observations()
       observations.push_back(vel * rl_params_->dof_vel_scale);
     } else if (rl_params_->observations_name[i] == "last_actions") {
       observations.push_back(obs_.last_actions);
+    } else if (rl_params_->observations_name[i] == "jump_cmd") {
+      DVec<tensor_element_t> jump_cmd(1);
+      jump_cmd[0] = _data->rc_data->fsm_name_ == "jump" ? 1.0f : 0.0f;
+      observations.push_back(jump_cmd);
     } else if (rl_params_->observations_name[i] == "phases") {
       observations.push_back(obs_.phases);
     } else {

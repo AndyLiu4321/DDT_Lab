@@ -1,0 +1,112 @@
+<mujoco model="andymini">
+  <compiler angle="radian"/>
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+
+  <worldbody>
+    <body name="base_link" pos="0 0 0.35">
+      <inertial pos="0.0272096 0.000129587 -0.00824302"
+                quat="0.562229 0.566304 -0.424749 0.427536"
+                mass="6.65735" diaginertia="0.0416409 0.0288335 0.0252217"/>
+      <joint name="floating_base" type="free"/>
+      <geom size="0.18 0.15 0.095" type="box" rgba="0.752941 0.752941 0.752941 1"/>
+
+      <body name="left_leg_1" pos="0.0108324 0.1335 0.00370167">
+        <inertial pos="-0.035651 0.046477 -0.024313"
+                  quat="0.638639 0.309491 0.304834 0.635163"
+                  mass="1.4568" diaginertia="0.0037621 0.00313129 0.000742811"/>
+        <joint name="joint_left_leg_1" axis="0 1 0" range="-1.57 0.52" actuatorfrcrange="-11 11"/>
+        <geom size="0.125 0.02 0.04" pos="-0.06 0.065 -0.05"
+              quat="0.960806 0 -0.27722 0" type="box"/>
+        <body name="left_leg_2" pos="-0.117192 0.0435 -0.108932">
+          <inertial pos="0.12003 -0.0029519 -0.027706"
+                    quat="0.452733 0.544559 0.543039 0.451216"
+                    mass="0.84836" diaginertia="0.00239482 0.00210285 0.000349164"/>
+          <joint name="joint_left_leg_2" axis="0 1 0" range="0 1.26" actuatorfrcrange="-11 11"/>
+          <geom size="0.13 0.01 0.035" pos="0.07 -0.014 -0.014"
+                quat="0.99078 0 0.135482 0" type="box"/>
+          <body name="left_leg_3" pos="0.175005 0.023 -0.0325245">
+            <inertial pos="-1.4662e-05 0.0030534 -2.1762e-06"
+                      quat="0.686533 -0.169409 -0.169425 0.68649"
+                      mass="0.78717" diaginertia="0.0024303 0.00132114 0.00132096"/>
+            <joint name="joint_left_leg_3" axis="0 1 0" range="-62831.8 62831.8" actuatorfrcrange="-11 11"/>
+            <geom size="0.0755 0.017" quat="0.707388 0.706825 0 0" type="cylinder"/>
+          </body>
+          <body name="left_wheel_1" pos="0.0197237 -0.012 -0.0799498">
+            <inertial pos="2.79305e-08 0 -6.50762e-08" quat="0.707107 0 0 0.707107"
+                      mass="0.05" diaginertia="2.45054e-05 1.38785e-05 1.38785e-05"/>
+            <joint name="joint_left_wheel_1" axis="0 1 0" damping="0.001" frictionloss="0.001"/>
+            <geom size="0.03 0.007" quat="0.707388 0.706825 0 0" type="cylinder"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="right_leg_1" pos="0.010832 -0.1335 0.0037014">
+        <inertial pos="-0.035731 -0.046428 -0.024276"
+                  quat="0.634176 0.305801 0.309694 0.639059"
+                  mass="1.4529" diaginertia="0.0037362 0.00310889 0.000737911"/>
+        <joint name="joint_right_leg_1" axis="0 1 0" range="-1.57 0.52" actuatorfrcrange="-11 11"/>
+        <geom size="0.125 0.02 0.04" pos="-0.06 -0.065 -0.05"
+              quat="0.960806 0 -0.27722 0" type="box"/>
+        <body name="right_leg_2" pos="-0.11719 -0.0435 -0.10893">
+          <inertial pos="0.11999 0.0029519 -0.027923"
+                    quat="0.450765 0.543587 0.543983 0.453218"
+                    mass="0.84837" diaginertia="0.00239482 0.0021028 0.000349136"/>
+          <joint name="joint_right_leg_2" axis="0 1 0" range="0 1.26" actuatorfrcrange="-11 11"/>
+          <geom size="0.13 0.01 0.035" pos="0.07 0.014 -0.014"
+                quat="0.99078 0 0.135482 0" type="box"/>
+          <body name="right_leg_3" pos="0.175007 -0.023 -0.0325163">
+            <inertial pos="-4.8421e-06 -0.0030534 -1.2896e-05"
+                      quat="0.363198 0.606686 0.606728 0.36318"
+                      mass="0.78717" diaginertia="0.0024303 0.00132114 0.00132096"/>
+            <joint name="joint_right_leg_3" axis="0 1 0" range="-62831.8 62831.8" actuatorfrcrange="-11 11"/>
+            <geom size="0.0755 0.017" quat="0.707388 0.706825 0 0" type="cylinder"/>
+          </body>
+          <body name="right_wheel_1" pos="0.0197272 0.012 -0.079949">
+            <inertial pos="2.14719e-08 0 -6.74832e-08" quat="0.707107 0 0 0.707107"
+                      mass="0.05" diaginertia="2.45054e-05 1.38785e-05 1.38785e-05"/>
+            <joint name="joint_right_wheel_1" axis="0 -1 0" damping="0.001" frictionloss="0.001"/>
+            <geom size="0.03 0.007" quat="0.707388 0.706825 0 0" type="cylinder"/>
+          </body>
+        </body>
+      </body>
+      <site name="trunk_imu" size="0.005"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="joint_left_leg_1" joint="joint_left_leg_1" ctrllimited="true" ctrlrange="-11 11"/>
+    <motor name="joint_left_leg_2" joint="joint_left_leg_2" ctrllimited="true" ctrlrange="-11 11"/>
+    <motor name="joint_left_leg_3" joint="joint_left_leg_3" ctrllimited="true" ctrlrange="-11 11"/>
+    <motor name="joint_right_leg_1" joint="joint_right_leg_1" ctrllimited="true" ctrlrange="-11 11"/>
+    <motor name="joint_right_leg_2" joint="joint_right_leg_2" ctrllimited="true" ctrlrange="-11 11"/>
+    <motor name="joint_right_leg_3" joint="joint_right_leg_3" ctrllimited="true" ctrlrange="-11 11"/>
+  </actuator>
+
+  <!-- rl_sim_mujoco indexes sensordata as q[6], dq[6], tau[6], quat[4], gyro[3]. -->
+  <sensor>
+    <jointpos name="left_leg_1_pos" joint="joint_left_leg_1"/>
+    <jointpos name="left_leg_2_pos" joint="joint_left_leg_2"/>
+    <jointpos name="left_leg_3_pos" joint="joint_left_leg_3"/>
+    <jointpos name="right_leg_1_pos" joint="joint_right_leg_1"/>
+    <jointpos name="right_leg_2_pos" joint="joint_right_leg_2"/>
+    <jointpos name="right_leg_3_pos" joint="joint_right_leg_3"/>
+
+    <jointvel name="left_leg_1_vel" joint="joint_left_leg_1"/>
+    <jointvel name="left_leg_2_vel" joint="joint_left_leg_2"/>
+    <jointvel name="left_leg_3_vel" joint="joint_left_leg_3"/>
+    <jointvel name="right_leg_1_vel" joint="joint_right_leg_1"/>
+    <jointvel name="right_leg_2_vel" joint="joint_right_leg_2"/>
+    <jointvel name="right_leg_3_vel" joint="joint_right_leg_3"/>
+
+    <jointactuatorfrc name="left_leg_1_torque" joint="joint_left_leg_1"/>
+    <jointactuatorfrc name="left_leg_2_torque" joint="joint_left_leg_2"/>
+    <jointactuatorfrc name="left_leg_3_torque" joint="joint_left_leg_3"/>
+    <jointactuatorfrc name="right_leg_1_torque" joint="joint_right_leg_1"/>
+    <jointactuatorfrc name="right_leg_2_torque" joint="joint_right_leg_2"/>
+    <jointactuatorfrc name="right_leg_3_torque" joint="joint_right_leg_3"/>
+
+    <framequat name="trunk_imu_quat" objtype="site" objname="trunk_imu"/>
+    <gyro name="trunk_imu_gyro" site="trunk_imu"/>
+    <accelerometer name="trunk_imu_acc" site="trunk_imu"/>
+  </sensor>
+</mujoco>

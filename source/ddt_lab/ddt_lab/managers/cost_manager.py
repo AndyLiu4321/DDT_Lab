@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -39,11 +39,10 @@ Cost functions follow the Isaac Lab reward-function signature:
 from __future__ import annotations
 
 import torch
-from prettytable import PrettyTable
-
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers.manager_term_cfg import ManagerTermBaseCfg
 from isaaclab.utils import configclass
+from prettytable import PrettyTable
 
 
 @configclass
@@ -141,11 +140,13 @@ class CostManager:
     def compute(self) -> torch.Tensor:
         """Return ``(num_envs, num_costs)`` per-step costs (clamped to >=0).
 
-        Side-effect: accumulates each term into ``self._episode_sums``."""
+        Side-effect: accumulates each term into ``self._episode_sums``,
+        multiplied by ``env.step_dt`` so the episode totals represent
+        time-integrated cost (e.g. cost-seconds)."""
         cols = []
         for name, term in self._terms:
             val = (term.func(self._env, **term.params) * term.scale).clamp_min_(0.0)
-            self._episode_sums[name] += val
+            self._episode_sums[name] += val * self._env.step_dt
             cols.append(val.unsqueeze(-1))
         return torch.cat(cols, dim=-1)
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -6,6 +6,7 @@ import math
 
 import ddt_lab.tasks.manager_based.locomotion.mdp as mdp
 import isaaclab.sim as sim_utils
+from ddt_lab.managers import CostTermCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
@@ -274,10 +275,56 @@ class ObservationsCfg:
             # self.enable_corruption = False
             # self.concatenate_terms = True
 
+    @configclass
+    class PrivCfg(ObsGroup):
+        """Privileged physical parameters for the critic.
+
+        Absent from the policy group so the actor cannot directly observe them.
+        The BarlowTwins history encoder must implicitly infer them from proprio
+        history — this is the NP3O privileged-learning mechanism.
+        Mirrors ``LocomotionWithNP3O`` ``priv_latent`` subset that is cheaply
+        available from Isaac Lab's Articulation data without extra PhysX calls.
+        """
+
+        contact_state = ObsTerm(
+            func=mdp.contact_state,
+            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"])},
+            clip=(-1.0, 1.0),
+            scale=1.0,
+        )
+        joint_kp_factor = ObsTerm(
+            func=mdp.joint_kp_factor,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+            clip=(0.0, 2.0),
+            scale=1.0,
+        )
+        joint_kd_factor = ObsTerm(
+            func=mdp.joint_kd_factor,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+            clip=(0.0, 2.0),
+            scale=1.0,
+        )
+
+    @configclass
+    class ScannerCfg(ObsGroup):
+        """Height-scan input for the critic / scan encoder.
+
+        Set to ``None`` on flat-terrain tasks where the scene has no
+        ``height_scanner``.
+        """
+
+        height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            clip=(-1.0, 1.0),
+            scale=1.0,
+        )
+
     # observation groups
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
-
+    priv: PrivCfg = PrivCfg()
+    scanner: ScannerCfg = ScannerCfg()
 
 @configclass
 class EventCfg:
@@ -448,15 +495,83 @@ class RewardsCfg:
     )
     # -- optional penalties
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
+    upward = RewTerm(func=mdp.upward, weight=0.0)
+    # CartPole-style survival signal (disabled by default; enabled in recovery env)
+    alive = RewTerm(func=mdp.is_alive, weight=0.0)
+    is_terminated = RewTerm(func=mdp.is_terminated, weight=0.0)
+    # Recovery: penalty per step that base_link contacts ground (no episode reset)
+    base_contact_penalty = RewTerm(
+        func=mdp.undesired_contacts,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base_link"]), "threshold": 1.0},
+    )
     # dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
     base_height_l2 = RewTerm(
         func=mdp.base_height_l2,
-        weight=-10.0,
+        weight=-2.0,
         params={
             # "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
             # "sensor_cfg": SceneEntityCfg("height_scanner_base"),
-            "target_height": 0.3,
+            "target_height": 0.35,
         },
+    )
+    # Recovery terms. Disabled for normal Tita locomotion and enabled by the
+    # jump/recovery subclasses. These use the same MDP functions as Mini.
+    upright_progress = RewTerm(func=mdp.upright_progress, weight=0.0)
+    inverted_ang_vel_bonus = RewTerm(func=mdp.inverted_ang_vel_bonus, weight=0.0)
+    inverted_leg_swing_momentum = RewTerm(
+        func=mdp.inverted_leg_swing_momentum,
+        weight=0.0,
+        params={
+            "momentum_scale": 0.25,
+            "contact_force_threshold": 1.0,
+            "asset_cfg": SceneEntityCfg("robot", body_names=[".*_leg_(1|2|3|4)"]),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base_link"]),
+        },
+    )
+    base_contact_raw = RewTerm(
+        func=mdp.undesired_contacts_raw,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base_link"]), "threshold": 1.0},
+    )
+
+    # Stage-gated jump terms. The contact bodies are the two wheel links for
+    # both Mini 6DOT and Tita 8DOT; only the inherited action space differs.
+    jump_before_setting = RewTerm(
+        func=mdp.jump_before_setting,
+        weight=0.0,
+        params={
+            "crouch_height": 0.25,
+            "sigma": 0.04,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"]),
+        },
+    )
+    lin_vel_z_jump = RewTerm(
+        func=mdp.lin_vel_z_jump,
+        weight=0.0,
+        params={
+            "max_vel": 10.0,
+            "require_in_air": True,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"]),
+        },
+    )
+    jump_flight_height = RewTerm(
+        func=mdp.jump_flight_height,
+        weight=0.0,
+        params={
+            "base_height": 0.35,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"]),
+        },
+    )
+    jump_land_stability = RewTerm(
+        func=mdp.jump_land_stability,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"])},
+    )
+    jump_land_orientation = RewTerm(
+        func=mdp.jump_land_orientation,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=[".*_leg_4"])},
     )
 
 
@@ -476,6 +591,37 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+
+
+@configclass
+class CostsCfg:
+    """NP3O cost terms — guard hardware limits during constrained training.
+
+    Detected by ``IsaacLabNP3OWrapper``; drop this attribute to fall back to
+    PPO+BarlowTwins (zero-cost placeholder).
+    """
+
+    joint_pos_limit = CostTermCfg(
+        func=mdp.joint_pos_limit,
+        scale=1.0,
+        d_value=0.0,
+        k_value=0.01,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_leg_(1|2|3)"])},
+    )
+    joint_vel_limit = CostTermCfg(
+        func=mdp.joint_vel_limit,
+        scale=1.0,
+        d_value=0.0,
+        k_value=0.01,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
+    )
+    joint_torque_limit = CostTermCfg(
+        func=mdp.joint_torque_limit,
+        scale=1.0,
+        d_value=0.0,
+        k_value=0.01,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
+    )
 
 
 ##
@@ -498,6 +644,7 @@ class TitaRoughEnvCfg(ManagerBasedRLEnvCfg):
     terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
+    costs: CostsCfg = CostsCfg()
 
     def __post_init__(self):
         """Post initialization."""
@@ -562,3 +709,5 @@ class TitaRoughEnvCfg_PLAY(TitaRoughEnvCfg):
         # remove random pushing
         self.events.base_external_force_torque = None
         self.events.push_robot = None
+        # base 触地不重置，方便观察摔倒恢复行为
+        # self.terminations.base_contact = None
