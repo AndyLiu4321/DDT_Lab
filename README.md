@@ -1,336 +1,185 @@
-# ddt_lab — Multi-Algorithm Locomotion for Wheel-Legged Robots
+# DDT Lab：Andy 与 PACE 使用说明
 
-Locomotion training for the **D1** (quadruped with wheels) robot, supporting
-three RL algorithms built on [Isaac Lab](https://isaac-sim.github.io/IsaacLab/):
+本项目使用 Isaac Lab 和 NP3O 训练 Andy（AndyMini）轮足机器人。
+PACE 是 Andy 的执行器辨识参数版本，可用于固定参数训练和鲁棒续训。
 
-| Algorithm | Description | Script |
-|---|---|---|
-| **RSL-RL (PPO)** | Stock PPO baseline | `scripts/rsl_rl/` |
-| **NP3O** | BarlowTwins-augmented constrained PPO | `scripts/np3o/` |
-| **DreamWaQ** | CeNet VAE + PPO (implicit terrain estimation) | `scripts/dreamwaq/` |
+## 1. 环境准备
 
----
-
-## Prerequisites
-
-| Dependency | Version |
-|---|---|
-| NVIDIA Isaac Sim | 5.1 |
-| Isaac Lab | [v2.3.0](https://isaac-sim.github.io/IsaacLab/v2.3.0/index.html) |
-| Python | 3.11 (bundled with Isaac Sim) |
-| CUDA | 12.x |
-
----
-
-## Installation
-
-### 1. Install Isaac Lab
-
-Follow the [official guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
+使用已安装 Isaac Sim 5.1、Isaac Lab 2.3.0 的 Python 3.11 环境。本机示例：
 
 ```bash
-conda activate env_isaaclab
-```
-
-### 2. Clone this repo
-
-```bash
-git clone https://github.com/DDTRobot/DDT_Lab ddt_lab
-cd ddt_lab
-```
-
-### 3. Get robot URDF models
-
-URDF paths are controlled by `DDT_MODEL_DIR` in
-`source/ddt_lab/ddt_lab/assets/ddt_robot.py`.
-
-**Default — clone `ddt_ros2_control` inside `ddt_lab`:**
-
-```bash
-git clone https://github.com/DDTRobot/ddt_ros2_control.git ddt_ros2_control
-```
-
-Required layout:
-
-```
-ddt_lab/
-├── ddt_ros2_control/
-│   └── urdfs/
-│       ├── d1_description/urdf/robot.urdf
-│       └── ...
-├── source/
-└── scripts/
-```
-
-**Custom path** — edit `DDT_MODEL_DIR` in `ddt_robot.py` directly.
-
-### 4. Install ddt_lab
-
-```bash
+conda activate isaaclab-pace
+cd /home/htw/ddt_lab
 python -m pip install -e source/ddt_lab
 ```
 
-### 5. Verify
+Andy 训练需要 URDF 和配套 mesh，默认模型路径为：
+
+```text
+ddt_ros2_control/urdfs/andymini/urdf/andymini.urdf
+```
+
+模型需自行准备；仓库未跟踪此目录中的 Andy URDF。使用其他位置时，修改
+`source/ddt_lab/ddt_lab/assets/ddt_robot.py` 中的 `DDT_MODEL_DIR`。
+PACE 执行器代码和候选参数已放在本项目中，训练无需额外安装 PACE 包。
+
+检查任务注册：
 
 ```bash
-# Should print all DDT-* tasks
 python scripts/list_envs.py
 ```
 
----
+## 2. 选择任务
 
-## Available Tasks
+### Andy 基础任务
 
-| Algorithm | Flat train | Rough train | Flat play | Rough play |
-|---|---|---|---|---|
-| **RSL-RL** | `DDT-Velocity-Flat-D1-v0` | `DDT-Velocity-Rough-D1-v0` | `…-Play-v0` | `…-Play-v0` |
-| **NP3O** | `DDT-Velocity-Flat-D1-NP3O-v0` | `DDT-Velocity-Rough-D1-NP3O-v0` | `…-Play-v0` | `…-Play-v0` |
-| **DreamWaQ** | `DDT-Velocity-Flat-D1-DreamWaQ-v0` | `DDT-Velocity-Rough-D1-DreamWaQ-v0` | `…-Play-v0` | `…-Play-v0` |
+| 用途 | 训练任务 ID | 日志目录（相对 `logs/np3o/`） |
+| --- | --- | --- |
+| 平地运动 | `DDT-Velocity-Flat-Andy-v0` | `andy_flat` |
+| 粗糙地形运动 | `DDT-Velocity-Rough-Andy-v0` | `andy_rough` |
+| 平地恢复 | `DDT-Recovery-Flat-Andy-v0` | `andy_flat` |
+| 粗糙地形恢复 | `DDT-Recovery-Rough-Andy-v0` | `andy_rough` |
+| 跳跃 | `DDT-jump-Flat-Andy-v0` | `andy_jump` |
+| 高度控制 | `DDT-Height-Flat-Andy-v0` | `andy_height` |
 
----
+### Andy PACE 任务
 
-## Training
+| 用途 | 训练任务 ID | 日志目录（相对 `logs/np3o/`） |
+| --- | --- | --- |
+| 固定辨识参数的高度控制基线 | `DDT-Height-Flat-Andy-Pace-v0` | `andy_height_pace` |
+| 高度控制鲁棒续训 | `DDT-Height-Flat-Andy-Pace-Robust-v0` | `andy_height_pace_robust` |
+| 固定 0.35 m 高度运动 | `DDT-Velocity-Flat-Andy-Pace-Fixed035-v0` | `andy_pace_fixed035` |
 
-### RSL-RL (stock PPO)
+回放时将任务末尾的 `-v0` 改成 `-Play-v0`，例如
+`DDT-Height-Flat-Andy-Pace-Robust-Play-v0`。任务名区分大小写，跳跃任务使用小写 `jump`。
 
-```bash
-python scripts/rsl_rl/train.py --task=DDT-Velocity-Flat-D1-v0 \
-    --num_envs 4096 --headless
+## 3. Andy 训练与续训
 
-python scripts/rsl_rl/train.py --task=DDT-Velocity-Rough-D1-v0 \
-    --num_envs 4096 --headless
-```
-
-Logs → `logs/rsl_rl/<experiment_name>/<timestamp>/`
-
-### NP3O (BarlowTwins-PPO)
-
-```bash
-python scripts/np3o/train.py --task=DDT-Velocity-Flat-D1-NP3O-v0 \
-    --num_envs 4096 --headless
-
-python scripts/np3o/train.py --task=DDT-Velocity-Rough-D1-NP3O-v0 \
-    --num_envs 4096 --headless
-```
-
-Logs → `logs/np3o/<experiment_name>/<timestamp>/`
-
-### DreamWaQ (CeNet VAE + PPO)
+以高度控制为例；其他任务替换 `--task` 即可：
 
 ```bash
-python scripts/dreamwaq/train.py --task=DDT-Velocity-Rough-D1-DreamWaQ-v0 \
-    --num_envs 4096 --headless
-
-python scripts/dreamwaq/train.py --task=DDT-Velocity-Flat-D1-DreamWaQ-v0 \
-    --num_envs 4096 --headless
+python scripts/np3o/train.py \
+  --task DDT-Height-Flat-Andy-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --headless
 ```
 
-Logs → `logs/dreamwaq/<experiment_name>/<timestamp>/`
+日志和模型保存在 `logs/np3o/<实验名>/<时间戳>/`，模型文件为 `model_N.pt`。
+显存不足时减小 `--num_envs`；需要训练窗口时去掉 `--headless`。
 
-### Common flags
-
-| Flag | Default | Description |
-|---|---|---|
-| `--num_envs` | (from cfg) | Number of parallel environments |
-| `--max_iterations` | (from cfg) | Override total training iterations |
-| `--headless` | False | Disable rendering (recommended for training) |
-| `--seed` | None | Random seed |
-| `--device` | `cuda:0` | Training device |
-| `--experiment_name` | (from cfg) | Override log directory name (NP3O / DreamWaQ) |
-
-### Resume training
+从已有模型续训（将下方路径替换为真实 checkpoint 的绝对路径）：
 
 ```bash
-# NP3O / DreamWaQ
-python scripts/np3o/train.py --task=DDT-Velocity-Rough-D1-NP3O-v0 \
-    --num_envs 4096 --headless \
-    --resume \
-    --load_run ".*" \
-    --checkpoint "model_.*\.pt"
-
-# RSL-RL
-python scripts/rsl_rl/train.py --task=DDT-Velocity-Rough-D1-v0 \
-    --num_envs 4096 --headless \
-    --resume --load_run ".*" --checkpoint "model_.*\.pt"
+python scripts/np3o/train.py \
+  --task DDT-Height-Flat-Andy-v0 \
+  --num_envs 4096 \
+  --max_iterations 5000 \
+  --resume \
+  --checkpoint /absolute/path/to/model_20000.pt \
+  --experiment_name andy_height_resume \
+  --headless
 ```
 
-### Monitor training
+`--experiment_name` 可指定新的日志目录，也适合区分共用默认目录的运动与恢复任务。
+
+## 4. PACE 训练流程
+
+先从头训练固定参数基线：
 
 ```bash
-tensorboard --logdir logs/np3o       # NP3O
-tensorboard --logdir logs/dreamwaq   # DreamWaQ
-tensorboard --logdir logs/rsl_rl     # RSL-RL
+python scripts/np3o/train.py \
+  --task DDT-Height-Flat-Andy-Pace-v0 \
+  --num_envs 4096 \
+  --max_iterations 20000 \
+  --headless
 ```
 
-Key metrics (NP3O / DreamWaQ):
-
-| Metric | Healthy sign |
-|---|---|
-| `Train/mean_reward` | Steadily increasing |
-| `Policy/mean_noise_std` | Gradually decreases from 1.0 → ~0.5 |
-| `Loss/surrogate` | Negative, small magnitude |
-| `Loss/vae` (DreamWaQ) | Decreasing (CeNet VAE converging) |
-| `Loss/mean_imitation_loss` (NP3O) | Decreasing (BarlowTwins SSL converging) |
-
----
-
-## Play / Evaluate
-
-### RSL-RL
+基线稳定后，从该次训练的 checkpoint 进入鲁棒阶段：
 
 ```bash
-python scripts/rsl_rl/play.py --task=DDT-Velocity-Flat-D1-Play-v0
-python scripts/rsl_rl/play.py --task=DDT-Velocity-Flat-D1-Play-v0 \
-    --checkpoint /path/to/model_5000.pt
+python scripts/np3o/train.py \
+  --task DDT-Height-Flat-Andy-Pace-Robust-v0 \
+  --num_envs 4096 \
+  --max_iterations 5000 \
+  --resume \
+  --checkpoint /absolute/path/to/andy_height_pace/run/model_20000.pt \
+  --headless
 ```
 
-### NP3O
+Robust 加入动力学随机化、观测噪声和推扰课程。回放任务也保留随机化，
+短时间回放不足以验证最高档推扰效果。固定 0.35 m 任务可使用同一训练入口，
+将 `--task` 替换为 `DDT-Velocity-Flat-Andy-Pace-Fixed035-v0`。
+
+候选参数位于 `source/ddt_lab/ddt_lab/tasks/manager_based/locomotion/robots/andy/pace/data/200hz_candidate.json`。
+更换候选参数后应建立独立训练基线，避免混用不同动力学版本的模型。
+执行器配置和参数细节见 [PACE 说明](source/ddt_lab/ddt_lab/tasks/manager_based/locomotion/robots/andy/pace/README.md)。
+
+## 5. Isaac Lab 回放与策略导出
+
+指定与训练相匹配的 Play 任务及模型文件：
 
 ```bash
-python scripts/np3o/play.py --task=DDT-Velocity-Flat-D1-NP3O-Play-v0
-python scripts/np3o/play.py --task=DDT-Velocity-Flat-D1-NP3O-Play-v0 \
-    --checkpoint /path/to/model_5000.pt
-python scripts/np3o/play.py --task=DDT-Velocity-Flat-D1-NP3O-Play-v0 \
-    --export_policy --export_dir /tmp/d1_deploy
+python scripts/np3o/play.py \
+  --task DDT-Height-Flat-Andy-Pace-Robust-Play-v0 \
+  --checkpoint /absolute/path/to/model_5000.pt \
+  --num_envs 1 \
+  --keyboard
 ```
 
-### DreamWaQ
+省略 `--checkpoint` 时，脚本按任务的实验目录自动查找模型。
+如果训练使用过 `--experiment_name`，建议显式指定模型路径。
+使用键盘控制时，按启动后的控制提示操作。
+
+仅导出 TorchScript 和 ONNX，不进行回放：
 
 ```bash
-python scripts/dreamwaq/play.py --task=DDT-Velocity-Flat-D1-DreamWaQ-Play-v0
-python scripts/dreamwaq/play.py --task=DDT-Velocity-Flat-D1-DreamWaQ-Play-v0 \
-    --checkpoint /path/to/model_5000.pt
-python scripts/dreamwaq/play.py --task=DDT-Velocity-Flat-D1-DreamWaQ-Play-v0 \
-    --export_policy
+python scripts/np3o/play.py \
+  --task DDT-Height-Flat-Andy-Pace-Robust-Play-v0 \
+  --checkpoint /absolute/path/to/model_5000.pt \
+  --num_envs 1 \
+  --export_policy \
+  --headless
 ```
 
-### Exported policy format (NP3O / DreamWaQ)
+默认输出到模型所在目录的 `exported/`，可用 `--export_dir` 指定其他目录。
 
-| | NP3O | DreamWaQ |
-|---|---|---|
-| Input name | `nn_input` | `nn_input` |
-| Input shape | `(1, 10, n_proprio)` | `(1, 5, n_proprio)` |
-| Output name | `nn_output` | `nn_output` |
-| Output shape | `(1, n_actions)` | `(1, n_actions)` |
+## 6. MuJoCo sim2sim
 
-The last slice `[:, -1, :]` of the history buffer is used as the current frame internally.
-
----
-
-## Sanity-check environments
+在同一环境中准备 MuJoCo 推理依赖：
 
 ```bash
-python scripts/zero_agent.py   --task=DDT-Velocity-Flat-D1-v0
-python scripts/random_agent.py --task=DDT-Velocity-Flat-D1-v0
+python -m pip install mujoco onnxruntime pyyaml
 ```
 
----
-
-## Project structure
-
-```
-ddt_lab/
-├── scripts/
-│   ├── rsl_rl/          # train.py, play.py, cli_args.py
-│   ├── np3o/            # train.py, play.py
-│   └── dreamwaq/        # train.py, play.py
-└── source/ddt_lab/ddt_lab/
-    ├── algorithms/
-    │   ├── np3o/        # ActorCriticBarlowTwins, NP3O, runner, rollout_storage
-    │   └── dreamwaq/    # CeNet, ActorCriticDreamWaQ, PPO_DreamWaQ, runner
-    ├── managers/
-    │   └── cost_manager.py
-    └── tasks/manager_based/locomotion/
-        ├── mdp/         # rewards, costs, observations, events, curriculums
-        └── robots/d1/
-            ├── base_env_cfg.py        # shared MDP base (SceneCfg, RewardsCfg, …)
-            ├── rsl_rl/
-            │   ├── rough_env_cfg.py   # D1RoughEnvCfg_PLAY
-            │   ├── flat_env_cfg.py    # D1FlatEnvCfg, D1FlatEnvCfg_PLAY
-            │   └── agents/rsl_rl_ppo_cfg.py
-            ├── np3o/
-            │   ├── rough_env_cfg.py   # PrivilegedObsCfg + CostsCfg + NP3O cfgs
-            │   ├── flat_env_cfg.py    # D1FlatNP3OEnvCfg
-            │   └── agents/np3o_cfg.py
-            └── dreamwaq/
-                ├── rough_env_cfg.py   # PrivilegedObsCfg + DreamWaQ cfgs
-                ├── flat_env_cfg.py    # D1FlatDreamWaQEnvCfg
-                └── agents/dreamwaq_cfg.py
-```
-
----
-
-## Algorithm overview
-
-### RSL-RL (stock PPO)
-
-Standard on-policy PPO using Isaac Lab's `RslRlVecEnvWrapper`. Policy obs is
-flat 2-D `(B, D)`. No history, no privileged observations at inference.
-
-### NP3O
-
-Extends PPO with:
-- **BarlowTwins SSL** — self-supervised history encoder predicts velocity from
-  10-frame proprio history; actor uses the learned code without privileged obs
-  at inference.
-- **Constrained optimization** — cost terms (joint limits, torque limits) are
-  enforced via a Lagrangian multiplier. Remove `CostsCfg` from the env cfg to
-  fall back to unconstrained BarlowTwins-PPO.
-- **Privileged critic** — critic sees contact state, actuator gain factors,
-  body mass / CoM offsets, and applied forces; policy cannot.
-
-### DreamWaQ
-
-Extends PPO with:
-- **CeNet (Context Estimation Network)** — a VAE that maps 5-frame proprio
-  history to an explicit velocity code (`code_vel`, 3-D) and an implicit latent
-  code (`code_latent`, 16-D). The actor concatenates this 19-D code with the
-  current frame.
-- **Dual optimizer** — RL loss and VAE loss are optimized separately; CeNet
-  gradients do not flow through the RL objective.
-- No cost constraints.
-
----
-
-## Adding a new cost term (NP3O)
-
-```python
-# np3o/rough_env_cfg.py — add to CostsCfg
-@configclass
-class CostsCfg:
-    my_limit = CostTermCfg(
-        func=mdp.joint_pos_limit,
-        scale=1.0, d_value=0.0, k_value=0.01,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[...])},
-    )
-```
-
----
-
-## Code formatting
+使用 rl_sar 入口加载训练模型：
 
 ```bash
-pip install pre-commit
-pre-commit run --all-files
+python scripts/sim2sim/andy_height_mujoco_rl_sar.py \
+  --task DDT-Height-Flat-Andy-Pace-Robust-Play-v0 \
+  --checkpoint /absolute/path/to/model_5000.pt \
+  --num_envs 1 \
+  --keyboard
 ```
 
----
+这里的 `--checkpoint` 支持模型文件或训练目录；目录模式选择编号最大的 `model_N.pt`。
+需要时脚本自动调用 Isaac Lab 导出策略，并更新
+`scripts/sim2sim/andy_rl_sar_reference/policy/andymini/robot_lab/` 下的部署策略及来源记录。
+因此自动导出需要在支持 Isaac Lab 的环境中运行。
 
-## Troubleshooting
+也可用 `--policy /absolute/path/to/policy.onnx` 直接加载 ONNX，与 `--checkpoint` 二选一。
+MuJoCo 始终运行一台机器人。高度任务窗口按键：W/S 前后运动，A/D 调整高度，
+Q/E 转向，空格清零速度命令。
 
-**`FileNotFoundError` / URDF not found**
+部署使用的 YAML、模型和控制时序需与目标训练配置核对；同步策略文件不会自动同步全部动力学配置。
+更多入口说明见 [sim2sim 使用说明](scripts/sim2sim/README.md)。
 
-Make sure `ddt_ros2_control` is cloned inside `ddt_lab` or update `DDT_MODEL_DIR`
-in `source/ddt_lab/ddt_lab/assets/ddt_robot.py`.
+## 7. 查看训练进度
 
-**Pylance missing extension indexing**
-
-Add to `.vscode/settings.json`:
-
-```json
-{
-    "python.analysis.extraPaths": [
-        "<path-to-ext-repo>/source/ddt_lab"
-    ]
-}
+```bash
+tensorboard --logdir logs/np3o
 ```
+
+需要修改任务参数时，Andy 配置位于
+`source/ddt_lab/ddt_lab/tasks/manager_based/locomotion/robots/andy/`，
+PACE 配置位于该目录下的 `pace/`。
